@@ -207,6 +207,7 @@
     <div class="nav-item" data-view="cartas" onclick="switchView('cartas', this)"><span class="dot"></span> Cartas de distrato<span class="badge" id="badgeCartas">0</span></div>
     <div class="nav-item" data-view="finalizados" onclick="switchView('finalizados', this)"><span class="dot"></span> Finalizados</div>
     <div class="nav-item" data-view="lote" onclick="switchView('lote', this)"><span class="dot"></span> Atualizar em lote</div>
+    <div class="nav-item" data-view="resumo" onclick="switchView('resumo', this)"><span class="dot"></span> Resumo</div>
 
     <div class="sidebar-footer">Dados salvos automaticamente</div>
   </div>
@@ -303,6 +304,17 @@ Para ADICIONAR um cliente/torre novo, inclua também "regional":
           <button class="btn-ghost" onclick="document.getElementById('loteInput').value=''; document.getElementById('loteResultado').innerHTML='';">Limpar</button>
         </div>
         <div id="loteResultado" style="margin-top:14px; font-size:13px;"></div>
+      </div>
+    </div>
+
+    <div class="view" id="view-resumo">
+      <h2 class="section-title">Resumo executivo</h2>
+      <p class="section-sub">Situação geral do projeto, atualizada automaticamente.</p>
+      <div class="list-card">
+        <div id="resumoTexto" style="font-size:14px; line-height:1.8; color:#14162B;"></div>
+        <div style="margin-top:16px;">
+          <button class="btn-small" onclick="copiarResumo()">Copiar texto</button>
+        </div>
       </div>
     </div>
 
@@ -472,7 +484,7 @@ function switchView(viewName, el) {
   el.classList.add("active");
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   document.getElementById("view-" + viewName).classList.add("active");
-  const titles = { visao: "Migração de Torres", regionais: "Regionais e torres", cartas: "Cartas de distrato", finalizados: "Clientes finalizados", lote: "Atualizar em lote" };
+  const titles = { visao: "Migração de Torres", regionais: "Regionais e torres", cartas: "Cartas de distrato", finalizados: "Clientes finalizados", lote: "Atualizar em lote", resumo: "Resumo executivo" };
   document.getElementById("viewTitle").textContent = titles[viewName];
 }
 function switchViewByName(viewName) {
@@ -488,6 +500,7 @@ function renderAll() {
   renderContent();
   renderCartasList();
   renderFinalizadosList();
+  renderResumo();
 }
 
 function renderTopStatus() {
@@ -626,6 +639,53 @@ function renderFinalizadosList() {
       <span class="tag tag-green">Concluído</span>
     </div>
   `).join("");
+}
+
+function renderResumo() {
+  const total = data.length;
+  const concluidos = data.filter(d => d.status === "Concluído").length;
+  const andamento = data.filter(d => d.status === "Em andamento").length;
+  const pendentes = data.filter(d => d.status === "Pendente").length;
+  const cancelados = data.filter(d => d.status === "Cancelado (sem alternativa)").length;
+
+  const torresMap = {};
+  data.forEach(d => { torresMap[d.torre] = torresMap[d.torre] || []; torresMap[d.torre].push(d.status); });
+  const totalTorres = Object.keys(torresMap).length;
+  let torresProntas = 0, torresCanceladas = 0, torresPendentes = 0, torresMistas = 0;
+  Object.values(torresMap).forEach(sts => {
+    if (sts.every(s => s === "Concluído")) torresProntas++;
+    else if (sts.every(s => s === "Cancelado (sem alternativa)")) torresCanceladas++;
+    else if (sts.every(s => s === "Pendente")) torresPendentes++;
+    else torresMistas++;
+  });
+
+  const dataAtual = new Date().toLocaleDateString("pt-BR");
+
+  const texto = `
+    <p><strong>Atualizado em ${dataAtual}</strong></p>
+    <p>O projeto de migração conta com <strong>${totalTorres} torres</strong> e <strong>${total} clientes</strong> ao todo.</p>
+    <ul style="padding-left:20px; margin:0;">
+      <li style="margin-bottom:8px;"><strong>${torresProntas}</strong> torre(s) já ${torresProntas === 1 ? "pode" : "podem"} ser desmontada(s) — todos os clientes já migrados.</li>
+      <li style="margin-bottom:8px;"><strong>${concluidos}</strong> cliente(s) já migrado(s) com sucesso.</li>
+      <li style="margin-bottom:8px;"><strong>${andamento}</strong> cliente(s) em andamento (viabilidade em análise ou negociação).</li>
+      <li style="margin-bottom:8px;"><strong>${cancelados}</strong> cliente(s) sem alternativa — serão cancelados.</li>
+      <li style="margin-bottom:8px;"><strong>${pendentes}</strong> cliente(s) ainda sem nenhuma atualização de campo.</li>
+      <li style="margin-bottom:8px;"><strong>${torresCanceladas}</strong> torre(s) com 100% dos clientes cancelados, aguardando contato antes do desmonte.</li>
+      <li><strong>${torresPendentes}</strong> torre(s) sem nenhuma visita técnica ainda.</li>
+    </ul>
+  `;
+  const el = document.getElementById("resumoTexto");
+  if (el) el.innerHTML = texto;
+}
+
+function copiarResumo() {
+  const el = document.getElementById("resumoTexto");
+  const texto = el.innerText;
+  navigator.clipboard.writeText(texto).then(() => {
+    alert("Resumo copiado! Já pode colar onde quiser.");
+  }).catch(() => {
+    alert("Não consegui copiar automaticamente. Selecione o texto e copie manualmente (Ctrl+C).");
+  });
 }
 
 function formatarDataBR(iso) { const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; }
