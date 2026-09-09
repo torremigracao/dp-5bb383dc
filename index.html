@@ -521,7 +521,9 @@ function renderSummaryCards() {
   const cancelado = data.filter(d => d.status === "Cancelado (sem alternativa)").length;
   const torres = {};
   data.forEach(d => { torres[d.torre] = torres[d.torre] || []; torres[d.torre].push(d.status); });
-  const prontas = Object.values(torres).filter(sts => sts.every(s => s === "Concluído")).length;
+  const prontas = Object.entries(torres).filter(([torre, sts]) =>
+    !TORRES_MANTIDAS_ATIVAS.includes(torre) && sts.every(s => s === "Concluído")
+  ).length;
 
   document.getElementById("summaryCards").innerHTML = `
     <div class="metric-card c-blue"><div class="label">Total</div><div class="num">${total}</div></div>
@@ -641,6 +643,8 @@ function renderFinalizadosList() {
   `).join("");
 }
 
+const TORRES_MANTIDAS_ATIVAS = ["UNI-MACH-AMX", "UNI-MACH-CCB", "UNI-MACH-CCN"];
+
 function renderResumo() {
   const total = data.length;
   const concluidos = data.filter(d => d.status === "Concluído").length;
@@ -652,11 +656,19 @@ function renderResumo() {
   data.forEach(d => { torresMap[d.torre] = torresMap[d.torre] || []; torresMap[d.torre].push(d.status); });
   const totalTorres = Object.keys(torresMap).length;
   let torresProntas = 0, torresCanceladas = 0, torresPendentes = 0, torresMistas = 0;
-  Object.values(torresMap).forEach(sts => {
-    if (sts.every(s => s === "Concluído")) torresProntas++;
-    else if (sts.every(s => s === "Cancelado (sem alternativa)")) torresCanceladas++;
-    else if (sts.every(s => s === "Pendente")) torresPendentes++;
-    else torresMistas++;
+  let torresMantidas = 0;
+  Object.entries(torresMap).forEach(([torre, sts]) => {
+    if (TORRES_MANTIDAS_ATIVAS.includes(torre)) {
+      torresMantidas++;
+    } else if (sts.every(s => s === "Concluído")) {
+      torresProntas++;
+    } else if (sts.every(s => s === "Cancelado (sem alternativa)")) {
+      torresCanceladas++;
+    } else if (sts.every(s => s === "Pendente")) {
+      torresPendentes++;
+    } else {
+      torresMistas++;
+    }
   });
 
   const dataAtual = new Date().toLocaleDateString("pt-BR");
@@ -666,7 +678,8 @@ function renderResumo() {
     <p>O projeto de migração conta com <strong>${totalTorres} torres</strong> e <strong>${total} clientes</strong> ao todo.</p>
     <ul style="padding-left:20px; margin:0;">
       <li style="margin-bottom:8px;"><strong>${torresProntas}</strong> torre(s) já ${torresProntas === 1 ? "pode" : "podem"} ser desmontada(s) — todos os clientes já migrados.</li>
-      <li style="margin-bottom:8px;"><strong>${concluidos}</strong> cliente(s) já migrado(s) com sucesso.</li>
+      <li style="margin-bottom:8px;"><strong>${torresMantidas}</strong> torre(s) mantida(s) ativa(s) por decisão operacional (não serão desmontadas).</li>
+      <li style="margin-bottom:8px;"><strong>${concluidos}</strong> cliente(s) já migrado(s) ou resolvido(s) com sucesso.</li>
       <li style="margin-bottom:8px;"><strong>${andamento}</strong> cliente(s) em andamento (viabilidade em análise ou negociação).</li>
       <li style="margin-bottom:8px;"><strong>${cancelados}</strong> cliente(s) sem alternativa — serão cancelados.</li>
       <li style="margin-bottom:8px;"><strong>${pendentes}</strong> cliente(s) ainda sem nenhuma atualização de campo.</li>
