@@ -289,9 +289,14 @@
       <h2 class="section-title">Atualizar em lote</h2>
       <p class="section-sub">Cole aqui o bloco de atualização (formato JSON) e clique em Aplicar.</p>
       <div class="list-card">
-        <textarea id="loteInput" placeholder='Cole aqui algo como:
+        <textarea id="loteInput" placeholder='Para ATUALIZAR um cliente existente:
 [
   {"cliente": "Beatriz Ferreira Moreira", "torre": "UNI-NBA-SEV", "status": "Concluído", "obs": "Migrado com sucesso"}
+]
+
+Para ADICIONAR um cliente/torre novo, inclua também "regional":
+[
+  {"cliente": "Novo Cliente Aqui", "torre": "UNI-XXX-YYY", "regional": "Alta Floresta", "status": "Pendente", "obs": ""}
 ]' style="width:100%; min-height:220px; font-family: monospace; font-size:12px; padding:12px; border-radius:8px; border:1px solid var(--border);"></textarea>
         <div style="display:flex; gap:10px; margin-top:12px; align-items:center;">
           <button class="btn-primary" onclick="aplicarLote()">Aplicar atualização</button>
@@ -415,8 +420,10 @@ async function aplicarLote() {
     return;
   }
 
-  let aplicados = 0;
-  let naoEncontrados = [];
+  let atualizados = 0;
+  let criados = 0;
+  let semRegional = [];
+  let proximoId = data.length > 0 ? Math.max(...data.map(d => d.id)) + 1 : 1;
 
   updates.forEach(u => {
     const item = data.find(d =>
@@ -426,21 +433,36 @@ async function aplicarLote() {
     if (item) {
       if (u.status) item.status = u.status;
       if (u.obs !== undefined) item.obs = u.obs;
-      aplicados++;
+      atualizados++;
     } else {
-      naoEncontrados.push(u.cliente || "(sem nome)");
+      if (!u.regional || !u.torre || !u.cliente) {
+        semRegional.push(u.cliente || "(sem nome)");
+        return;
+      }
+      data.push({
+        id: proximoId++,
+        cliente: u.cliente,
+        torre: u.torre,
+        regional: u.regional,
+        status: u.status || "Pendente",
+        obs: u.obs || "",
+      });
+      criados++;
     }
   });
 
-  if (aplicados > 0) {
+  if (atualizados > 0 || criados > 0) {
     await saveData(true);
     renderAll();
   }
 
-  let msg = `<span style="color:var(--green-text); font-weight:700;">${aplicados} cliente(s) atualizado(s) com sucesso.</span>`;
-  if (naoEncontrados.length > 0) {
-    msg += `<br><span style="color:var(--amber-text);">Não encontrados (confira o nome/torre): ${naoEncontrados.join(", ")}</span>`;
+  let msg = "";
+  if (atualizados > 0) msg += `<span style="color:var(--green-text); font-weight:700;">${atualizados} cliente(s) atualizado(s).</span><br>`;
+  if (criados > 0) msg += `<span style="color:var(--blue-dark); font-weight:700;">${criados} cliente(s)/torre(s) novo(s) adicionado(s).</span><br>`;
+  if (semRegional.length > 0) {
+    msg += `<span style="color:var(--red-text);">Não foi possível criar (falta "regional", "torre" ou "cliente"): ${semRegional.join(", ")}</span>`;
   }
+  if (!msg) msg = `<span style="color:var(--amber-text);">Nenhuma alteração aplicada.</span>`;
   resultadoEl.innerHTML = msg;
   document.getElementById("loteInput").value = "";
 }
