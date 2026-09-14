@@ -522,7 +522,7 @@ function renderSummaryCards() {
   const torres = {};
   data.forEach(d => { torres[d.torre] = torres[d.torre] || []; torres[d.torre].push(d.status); });
   const prontas = Object.entries(torres).filter(([torre, sts]) =>
-    !TORRES_MANTIDAS_ATIVAS.includes(torre) && sts.every(s => s === "Concluído")
+    !TORRES_MANTIDAS_ATIVAS.includes(torre) && !TORRES_PARTICULARES.includes(torre) && sts.every(s => s === "Concluído")
   ).length;
 
   document.getElementById("summaryCards").innerHTML = `
@@ -644,6 +644,7 @@ function renderFinalizadosList() {
 }
 
 const TORRES_MANTIDAS_ATIVAS = ["UNI-MACH-AMX", "UNI-MACH-CCB", "UNI-MACH-CCN"];
+const TORRES_PARTICULARES = ["UNI-AFL-GLO", "SISTEM-AFL-LRO", "UNI-IZI-XAR", "UNI-CSTH-BOS", "UNI-PBW-CLO", "WM-CWL-FLV"];
 
 function renderResumo() {
   const total = data.length;
@@ -656,10 +657,12 @@ function renderResumo() {
   data.forEach(d => { torresMap[d.torre] = torresMap[d.torre] || []; torresMap[d.torre].push(d.status); });
   const totalTorres = Object.keys(torresMap).length;
   let torresProntas = 0, torresCanceladas = 0, torresPendentes = 0, torresMistas = 0;
-  let torresMantidas = 0;
+  let torresMantidas = 0, torresParticulares = 0;
   Object.entries(torresMap).forEach(([torre, sts]) => {
     if (TORRES_MANTIDAS_ATIVAS.includes(torre)) {
       torresMantidas++;
+    } else if (TORRES_PARTICULARES.includes(torre)) {
+      torresParticulares++;
     } else if (sts.every(s => s === "Concluído")) {
       torresProntas++;
     } else if (sts.every(s => s === "Cancelado (sem alternativa)")) {
@@ -679,6 +682,7 @@ function renderResumo() {
     <ul style="padding-left:20px; margin:0;">
       <li style="margin-bottom:8px;"><strong>${torresProntas}</strong> torre(s) já ${torresProntas === 1 ? "pode" : "podem"} ser desmontada(s) — todos os clientes já migrados.</li>
       <li style="margin-bottom:8px;"><strong>${torresMantidas}</strong> torre(s) mantida(s) ativa(s) por decisão operacional (não serão desmontadas).</li>
+      <li style="margin-bottom:8px;"><strong>${torresParticulares}</strong> torre(s) particular(es) (de terceiros), em tratativa para viabilizar solução.</li>
       <li style="margin-bottom:8px;"><strong>${concluidos}</strong> cliente(s) já migrado(s) ou resolvido(s) com sucesso.</li>
       <li style="margin-bottom:8px;"><strong>${andamento}</strong> cliente(s) em andamento (viabilidade em análise ou negociação).</li>
       <li style="margin-bottom:8px;"><strong>${cancelados}</strong> cliente(s) sem alternativa — serão cancelados.</li>
