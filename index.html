@@ -521,10 +521,11 @@ function renderTopStatus() {
   const totalClientes = data.length;
   const torres = new Set(data.map(d => d.torre)).size;
   document.getElementById("statusPillText").textContent = `${totalClientes} clientes · ${torres} torres`;
-  const cancelados = data.filter(d => d.status === "Cancelado (sem alternativa)").length;
-  document.getElementById("alertCartasNum").textContent = cancelados;
-  document.getElementById("badgeCartas").textContent = cancelados;
-  document.getElementById("badgeCartas").style.display = cancelados > 0 ? "inline-block" : "none";
+  const cancelados = data.filter(d => d.status === "Cancelado (sem alternativa)");
+  const pendentesEnvio = cancelados.filter(d => !d.cartaEnviada).length;
+  document.getElementById("alertCartasNum").textContent = pendentesEnvio;
+  document.getElementById("badgeCartas").textContent = pendentesEnvio;
+  document.getElementById("badgeCartas").style.display = pendentesEnvio > 0 ? "inline-block" : "none";
 }
 
 function renderSummaryCards() {
@@ -613,8 +614,13 @@ function renderContent() {
 
       clientes.forEach(c => {
         const isCancelado = c.status === "Cancelado (sem alternativa)";
+        const cartaInfo = isCancelado
+          ? (c.cartaEnviada
+              ? `<br><span class="tag tag-green" style="margin-top:4px; display:inline-block;">Carta enviada em ${c.dataEnvioCarta}</span>`
+              : `<br><button class="btn-carta" onclick="openCartaModal(${c.id})">Gerar carta</button> <button class="btn-carta" style="background:var(--green-bg); color:var(--green-text); border-color:#9AD9B5;" onclick="marcarCartaEnviada(${c.id})">Marcar enviada</button>`)
+          : "";
         html += `<div class="client-row">
-          <div class="name">${c.cliente}${isCancelado ? `<br><button class="btn-carta" onclick="openCartaModal(${c.id})">Gerar carta</button>` : ""}</div>
+          <div class="name">${c.cliente}${cartaInfo}</div>
           <select class="${statusClass(c.status)}" onchange="updateClient(${c.id}, 'status', this.value)">
             <option value="Pendente" ${c.status === "Pendente" ? "selected" : ""}>Pendente</option>
             <option value="Em andamento" ${c.status === "Em andamento" ? "selected" : ""}>Em andamento</option>
@@ -635,13 +641,48 @@ function renderCartasList() {
   const cancelados = data.filter(d => d.status === "Cancelado (sem alternativa)");
   const el = document.getElementById("cartasList");
   if (cancelados.length === 0) { el.innerHTML = '<div class="empty-msg">Nenhum cliente cancelado no momento.</div>'; return; }
-  el.innerHTML = cancelados.map(c => `
+
+  // Ordena: pendentes de envio primeiro
+  const ordenados = [...cancelados].sort((a, b) => (a.cartaEnviada === b.cartaEnviada) ? 0 : (a.cartaEnviada ? 1 : -1));
+
+  el.innerHTML = ordenados.map(c => `
     <div class="priority-row">
       <div class="priority-left"><strong>${c.cliente}</strong><span>${c.torre} · ${c.regional}</span></div>
-      <div class="priority-mid"><span class="tag tag-red">Sem alternativa</span></div>
-      <button class="btn-small" onclick="openCartaModal(${c.id})">Gerar carta</button>
+      <div class="priority-mid">
+        ${c.cartaEnviada
+          ? `<span class="tag tag-green">Enviada em ${c.dataEnvioCarta}</span>`
+          : `<span class="tag tag-red">Sem alternativa</span>`}
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <button class="btn-small" onclick="openCartaModal(${c.id})">Gerar carta</button>
+        ${c.cartaEnviada
+          ? `<button class="btn-small" onclick="desmarcarCartaEnviada(${c.id})">Desmarcar</button>`
+          : `<button class="btn-small" onclick="marcarCartaEnviada(${c.id})">Marcar enviada</button>`}
+      </div>
     </div>
   `).join("");
+}
+
+function marcarCartaEnviada(id) {
+  const item = data.find(d => d.id === id);
+  if (!item) return;
+  const hoje = new Date().toLocaleDateString("pt-BR");
+  const dataInformada = window.prompt("Data em que a carta foi entregue (DD/MM/AAAA):", hoje);
+  if (!dataInformada) return;
+  item.cartaEnviada = true;
+  item.dataEnvioCarta = dataInformada;
+  saveData();
+  renderAll();
+}
+
+function desmarcarCartaEnviada(id) {
+  const item = data.find(d => d.id === id);
+  if (!item) return;
+  if (!window.confirm("Desmarcar essa carta como enviada?")) return;
+  item.cartaEnviada = false;
+  item.dataEnvioCarta = "";
+  saveData();
+  renderAll();
 }
 
 function renderFinalizadosList() {
