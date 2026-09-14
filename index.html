@@ -688,7 +688,7 @@ function renderResumo() {
       <li style="margin-bottom:10px;"><strong>${andamento}</strong> cliente(s) em andamento (viabilidade em análise ou negociação).</li>
       <li style="margin-bottom:10px;"><strong>${cancelados}</strong> cliente(s) sem alternativa — serão cancelados.</li>
       <li style="margin-bottom:10px;"><strong>${pendentes}</strong> cliente(s) ainda sem nenhuma atualização de campo.</li>
-      <li style="margin-bottom:10px;"><strong>${listaCanceladas.length}</strong> torre(s) com 100% dos clientes cancelados, aguardando contato antes do desmonte.${fmt(listaCanceladas)}</li>
+      <li style="margin-bottom:10px;"><strong>${listaCanceladas.length}</strong> torre(s) com 100% dos clientes sem alternativa — clientes serão cancelados, aguardando envio da carta de distrato.${fmt(listaCanceladas)}</li>
       <li><strong>${listaPendentes.length}</strong> torre(s) sem nenhuma visita técnica ainda.${fmt(listaPendentes)}</li>
     </ul>
   `;
