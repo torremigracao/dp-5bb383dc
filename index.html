@@ -650,7 +650,8 @@ function renderResumo() {
   const total = data.length;
   const concluidos = data.filter(d => d.status === "Concluído").length;
   const andamento = data.filter(d => d.status === "Em andamento").length;
-  const pendentes = data.filter(d => d.status === "Pendente").length;
+  const pendentesSemInfo = data.filter(d => d.status === "Pendente" && !d.obs).length;
+  const pendentesComNota = data.filter(d => d.status === "Pendente" && d.obs).length;
   const cancelados = data.filter(d => d.status === "Cancelado (sem alternativa)").length;
 
   const torresMap = {};
@@ -687,7 +688,8 @@ function renderResumo() {
       <li style="margin-bottom:10px;"><strong>${concluidos}</strong> cliente(s) já migrado(s) ou resolvido(s) com sucesso.</li>
       <li style="margin-bottom:10px;"><strong>${andamento}</strong> cliente(s) em andamento (viabilidade em análise ou negociação).</li>
       <li style="margin-bottom:10px;"><strong>${cancelados}</strong> cliente(s) sem alternativa — serão cancelados.</li>
-      <li style="margin-bottom:10px;"><strong>${pendentes}</strong> cliente(s) ainda sem nenhuma atualização de campo.</li>
+      <li style="margin-bottom:10px;"><strong>${pendentesComNota}</strong> cliente(s) pendente(s), mas já com alguma observação registrada (aguardando decisão/estudo).</li>
+      <li style="margin-bottom:10px;"><strong>${pendentesSemInfo}</strong> cliente(s) sem nenhuma informação registrada ainda.</li>
       <li style="margin-bottom:10px;"><strong>${listaCanceladas.length}</strong> torre(s) com 100% dos clientes sem alternativa — clientes serão cancelados, aguardando envio da carta de distrato.${fmt(listaCanceladas)}</li>
       <li><strong>${listaPendentes.length}</strong> torre(s) sem nenhuma visita técnica ainda.${fmt(listaPendentes)}</li>
     </ul>
