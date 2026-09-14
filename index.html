@@ -656,39 +656,40 @@ function renderResumo() {
   const torresMap = {};
   data.forEach(d => { torresMap[d.torre] = torresMap[d.torre] || []; torresMap[d.torre].push(d.status); });
   const totalTorres = Object.keys(torresMap).length;
-  let torresProntas = 0, torresCanceladas = 0, torresPendentes = 0, torresMistas = 0;
-  let torresMantidas = 0, torresParticulares = 0;
+
+  const listaProntas = [], listaMantidas = [], listaParticulares = [], listaCanceladas = [], listaPendentes = [];
   Object.entries(torresMap).forEach(([torre, sts]) => {
     if (TORRES_MANTIDAS_ATIVAS.includes(torre)) {
-      torresMantidas++;
+      listaMantidas.push(torre);
     } else if (TORRES_PARTICULARES.includes(torre)) {
-      torresParticulares++;
+      listaParticulares.push(torre);
     } else if (sts.every(s => s === "Concluído")) {
-      torresProntas++;
+      listaProntas.push(torre);
     } else if (sts.every(s => s === "Cancelado (sem alternativa)")) {
-      torresCanceladas++;
+      listaCanceladas.push(torre);
     } else if (sts.every(s => s === "Pendente")) {
-      torresPendentes++;
-    } else {
-      torresMistas++;
+      listaPendentes.push(torre);
     }
   });
 
   const dataAtual = new Date().toLocaleDateString("pt-BR");
+  const fmt = (lista) => lista.length > 0
+    ? `<br><span style="font-size:12px; color:var(--grey); font-weight:400;">${lista.join(", ")}</span>`
+    : "";
 
   const texto = `
     <p><strong>Atualizado em ${dataAtual}</strong></p>
     <p>O projeto de migração conta com <strong>${totalTorres} torres</strong> e <strong>${total} clientes</strong> ao todo.</p>
     <ul style="padding-left:20px; margin:0;">
-      <li style="margin-bottom:8px;"><strong>${torresProntas}</strong> torre(s) já ${torresProntas === 1 ? "pode" : "podem"} ser desmontada(s) — todos os clientes já migrados.</li>
-      <li style="margin-bottom:8px;"><strong>${torresMantidas}</strong> torre(s) mantida(s) ativa(s) por decisão operacional (não serão desmontadas).</li>
-      <li style="margin-bottom:8px;"><strong>${torresParticulares}</strong> torre(s) particular(es) (de terceiros), em tratativa para viabilizar solução.</li>
-      <li style="margin-bottom:8px;"><strong>${concluidos}</strong> cliente(s) já migrado(s) ou resolvido(s) com sucesso.</li>
-      <li style="margin-bottom:8px;"><strong>${andamento}</strong> cliente(s) em andamento (viabilidade em análise ou negociação).</li>
-      <li style="margin-bottom:8px;"><strong>${cancelados}</strong> cliente(s) sem alternativa — serão cancelados.</li>
-      <li style="margin-bottom:8px;"><strong>${pendentes}</strong> cliente(s) ainda sem nenhuma atualização de campo.</li>
-      <li style="margin-bottom:8px;"><strong>${torresCanceladas}</strong> torre(s) com 100% dos clientes cancelados, aguardando contato antes do desmonte.</li>
-      <li><strong>${torresPendentes}</strong> torre(s) sem nenhuma visita técnica ainda.</li>
+      <li style="margin-bottom:10px;"><strong>${listaProntas.length}</strong> torre(s) já ${listaProntas.length === 1 ? "pode" : "podem"} ser desmontada(s) — todos os clientes já migrados.${fmt(listaProntas)}</li>
+      <li style="margin-bottom:10px;"><strong>${listaMantidas.length}</strong> torre(s) mantida(s) ativa(s) por decisão operacional (não serão desmontadas).${fmt(listaMantidas)}</li>
+      <li style="margin-bottom:10px;"><strong>${listaParticulares.length}</strong> torre(s) particular(es) (de terceiros), em tratativa para viabilizar solução.${fmt(listaParticulares)}</li>
+      <li style="margin-bottom:10px;"><strong>${concluidos}</strong> cliente(s) já migrado(s) ou resolvido(s) com sucesso.</li>
+      <li style="margin-bottom:10px;"><strong>${andamento}</strong> cliente(s) em andamento (viabilidade em análise ou negociação).</li>
+      <li style="margin-bottom:10px;"><strong>${cancelados}</strong> cliente(s) sem alternativa — serão cancelados.</li>
+      <li style="margin-bottom:10px;"><strong>${pendentes}</strong> cliente(s) ainda sem nenhuma atualização de campo.</li>
+      <li style="margin-bottom:10px;"><strong>${listaCanceladas.length}</strong> torre(s) com 100% dos clientes cancelados, aguardando contato antes do desmonte.${fmt(listaCanceladas)}</li>
+      <li><strong>${listaPendentes.length}</strong> torre(s) sem nenhuma visita técnica ainda.${fmt(listaPendentes)}</li>
     </ul>
   `;
   const el = document.getElementById("resumoTexto");
