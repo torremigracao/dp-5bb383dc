@@ -319,7 +319,7 @@ Para ADICIONAR um cliente/torre novo, inclua também "regional":
           <input type="text" id="consultaBusca" placeholder="Nome do cliente ou da torre..." oninput="renderConsulta()" style="flex:2; min-width:200px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
           <select id="consultaRegional" onchange="renderConsulta()" style="flex:1; min-width:170px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;"><option value="">Todas as regionais</option></select>
           <select id="consultaTipo" onchange="renderConsulta()" style="flex:1; min-width:210px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
-            <option value="todos">Tudo</option>
+            <option value="todos">Resumo total</option>
             <option value="cartaEnviada">Cartas enviadas</option>
             <option value="cartaPendente">Cartas pendentes de envio</option>
             <option value="torrePronta">Torres prontas p/ desmontar</option>
@@ -328,8 +328,22 @@ Para ADICIONAR um cliente/torre novo, inclua também "regional":
             <option value="cancelado">Clientes cancelados</option>
             <option value="pendente">Clientes pendentes</option>
           </select>
+          <select id="consultaPeriodo" onchange="onConsultaPeriodoChange()" style="flex:1; min-width:170px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+            <option value="tudo">Qualquer data</option>
+            <option value="7">Última semana</option>
+            <option value="30">Último mês</option>
+            <option value="90">Último trimestre</option>
+            <option value="custom">Personalizado</option>
+          </select>
+          <span id="consultaCustomDatas" style="display:none; align-items:center; gap:6px;">
+            <input type="date" id="consultaDataDe" onchange="renderConsulta()" style="padding:9px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+            <span style="font-size:12px; color:var(--grey);">até</span>
+            <input type="date" id="consultaDataAte" onchange="renderConsulta()" style="padding:9px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+          </span>
           <button class="btn-ghost" onclick="limparConsulta()">Limpar filtros</button>
         </div>
+
+        <div id="consultaTorresDestaque" style="margin-bottom:14px;"></div>
 
         <div class="card-grid" id="consultaCards" style="margin-bottom:18px;"></div>
 
@@ -781,25 +795,6 @@ function renderResumo() {
   });
 
 
-  // Atividade recente — seletor de periodo (preserva selecao anterior, se existir)
-  const selAnterior = document.getElementById("seletorAtividadeResumo");
-  const periodoAtual = selAnterior ? selAnterior.value : "7";
-
-  const blocoAtividade = `
-    <div style="background: var(--teal-light); border: 1px solid var(--teal); border-radius: 10px; padding: 16px 20px; margin-bottom: 20px;">
-      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-        <p style="font-weight:700; margin:0; color: var(--blue-dark);">Atividade recente</p>
-        <select id="seletorAtividadeResumo" onchange="atualizarAtividadeResumo()" style="padding:5px 8px; border-radius:6px; border:1px solid var(--border); font-size:12px;">
-          <option value="7" ${periodoAtual === "7" ? "selected" : ""}>Semana (últimos 7 dias)</option>
-          <option value="30" ${periodoAtual === "30" ? "selected" : ""}>Mês (últimos 30 dias)</option>
-          <option value="90" ${periodoAtual === "90" ? "selected" : ""}>Trimestre (últimos 90 dias)</option>
-          <option value="tudo" ${periodoAtual === "tudo" ? "selected" : ""}>Tudo (desde o início)</option>
-        </select>
-      </div>
-      <div id="atividadeResumoConteudo"></div>
-    </div>
-  `;
-
   const dataAtual = new Date().toLocaleDateString("pt-BR");
   const fmt = (lista) => lista.length > 0
     ? `<br><span style="font-size:12px; color:var(--grey); font-weight:400;">${lista.join(", ")}</span>`
@@ -814,7 +809,6 @@ function renderResumo() {
   const texto = `
     <p><strong>Atualizado em ${dataAtual}</strong></p>
     <p>O projeto de migração conta com <strong>${totalTorres} torres</strong> e <strong>${total} clientes</strong> ao todo.</p>
-    ${blocoAtividade}
     <ul style="padding-left:20px; margin:0;">
       <li style="margin-bottom:10px;"><strong>${listaProntas.length}</strong> torre(s) já ${listaProntas.length === 1 ? "pode" : "podem"} ser desmontada(s) — todos os clientes já migrados.${fmt(listaProntas)}</li>
       <li style="margin-bottom:10px;"><strong>${listaMantidas.length}</strong> torre(s) mantida(s) ativa(s) por decisão operacional (não serão desmontadas).${fmt(listaMantidas)}</li>
@@ -830,7 +824,6 @@ function renderResumo() {
   `;
   const el = document.getElementById("resumoTexto");
   if (el) el.innerHTML = texto;
-  atualizarAtividadeResumo();
   popularFiltroRegionalConsulta();
   renderConsulta();
 }
@@ -894,6 +887,20 @@ function limparConsulta() {
   document.getElementById("consultaBusca").value = "";
   document.getElementById("consultaRegional").value = "";
   document.getElementById("consultaTipo").value = "todos";
+  document.getElementById("consultaPeriodo").value = "tudo";
+  document.getElementById("consultaCustomDatas").style.display = "none";
+  renderConsulta();
+}
+
+function onConsultaPeriodoChange() {
+  const tipo = document.getElementById("consultaPeriodo").value;
+  const campos = document.getElementById("consultaCustomDatas");
+  campos.style.display = tipo === "custom" ? "inline-flex" : "none";
+  if (tipo === "custom") {
+    const hoje = new Date().toISOString().split("T")[0];
+    if (!document.getElementById("consultaDataDe").value) document.getElementById("consultaDataDe").value = hoje;
+    if (!document.getElementById("consultaDataAte").value) document.getElementById("consultaDataAte").value = hoje;
+  }
   renderConsulta();
 }
 
@@ -901,11 +908,13 @@ function renderConsulta() {
   const buscaEl = document.getElementById("consultaBusca");
   const regionalEl = document.getElementById("consultaRegional");
   const tipoEl = document.getElementById("consultaTipo");
-  if (!buscaEl || !regionalEl || !tipoEl) return;
+  const periodoEl = document.getElementById("consultaPeriodo");
+  if (!buscaEl || !regionalEl || !tipoEl || !periodoEl) return;
 
   const busca = buscaEl.value.toLowerCase();
   const regional = regionalEl.value;
   const tipo = tipoEl.value;
+  const periodoTipo = periodoEl.value;
 
   // Torres 100% concluidas (para o filtro "torrePronta")
   const torresMap = {};
@@ -913,6 +922,22 @@ function renderConsulta() {
   const torresProntasSet = new Set(
     Object.entries(torresMap).filter(([t, sts]) => sts.every(s => s === "Concluído")).map(([t]) => t)
   );
+
+  // Filtro de periodo (baseado em atualizadoEm)
+  let desde = null, ate = null;
+  if (periodoTipo !== "tudo") {
+    if (periodoTipo === "custom") {
+      const deVal = document.getElementById("consultaDataDe").value;
+      const ateVal = document.getElementById("consultaDataAte").value;
+      if (deVal) desde = new Date(deVal + "T00:00:00");
+      if (ateVal) ate = new Date(ateVal + "T23:59:59");
+    } else {
+      const dias = parseInt(periodoTipo, 10);
+      desde = new Date();
+      desde.setDate(desde.getDate() - dias);
+      ate = new Date();
+    }
+  }
 
   let filtrados = data.filter(d => {
     const matchBusca = !busca || d.cliente.toLowerCase().includes(busca) || d.torre.toLowerCase().includes(busca);
@@ -925,19 +950,51 @@ function renderConsulta() {
     else if (tipo === "andamento") matchTipo = d.status === "Em andamento";
     else if (tipo === "cancelado") matchTipo = d.status === "Cancelado (sem alternativa)";
     else if (tipo === "pendente") matchTipo = d.status === "Pendente";
-    return matchBusca && matchRegional && matchTipo;
+
+    let matchPeriodo = true;
+    if (desde) {
+      if (!d.atualizadoEm) matchPeriodo = false;
+      else {
+        const dt = new Date(d.atualizadoEm);
+        matchPeriodo = dt >= desde && dt <= ate;
+      }
+    }
+
+    return matchBusca && matchRegional && matchTipo && matchPeriodo;
   });
 
-  // Cards de resumo
-  const torresDistintas = new Set(filtrados.map(d => d.torre)).size;
+  // Destaque de torres (quando o filtro de tipo é sobre torres, ou quando o resultado cobre poucas torres)
+  const torresEncontradas = [...new Set(filtrados.map(d => d.torre))].sort();
+  const destaqueEl = document.getElementById("consultaTorresDestaque");
+  if (tipo === "torrePronta") {
+    destaqueEl.innerHTML = torresEncontradas.length > 0
+      ? `<div style="background:var(--green-bg); border:1px solid #9AD9B5; border-radius:8px; padding:10px 14px; font-size:13px;"><strong>Torre(s) pronta(s) para desmontar:</strong> ${torresEncontradas.join(", ")}</div>`
+      : `<div style="background:var(--amber-bg); border:1px solid #E8D28A; border-radius:8px; padding:10px 14px; font-size:13px;">Nenhuma torre 100% pronta para desmontar com esses filtros.</div>`;
+  } else if (torresEncontradas.length > 0 && torresEncontradas.length <= 8) {
+    destaqueEl.innerHTML = `<div style="background:var(--grey-light); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:13px;"><strong>Torre(s):</strong> ${torresEncontradas.join(", ")}</div>`;
+  } else {
+    destaqueEl.innerHTML = "";
+  }
+
+  // Cards de resumo (sempre o conjunto completo, calculado sobre o filtrado)
+  const totalClientes = filtrados.length;
   const migrados = filtrados.filter(d => d.status === "Concluído").length;
+  const andamento = filtrados.filter(d => d.status === "Em andamento").length;
+  const cancelados = filtrados.filter(d => d.status === "Cancelado (sem alternativa)").length;
+  const pendentes = filtrados.filter(d => d.status === "Pendente").length;
   const cartasEnviadas = filtrados.filter(d => d.cartaEnviada).length;
+  const torresDistintas = torresEncontradas.length;
+  const torresProntasNoFiltro = torresEncontradas.filter(t => torresProntasSet.has(t)).length;
 
   document.getElementById("consultaCards").innerHTML = `
-    <div class="metric-card c-blue"><div class="label">Registros encontrados</div><div class="num">${filtrados.length}</div></div>
+    <div class="metric-card c-blue"><div class="label">Total de clientes</div><div class="num">${totalClientes}</div></div>
     <div class="metric-card c-blue"><div class="label">Torres envolvidas</div><div class="num">${torresDistintas}</div></div>
-    <div class="metric-card c-green"><div class="label">Já migrados</div><div class="num">${migrados}</div></div>
+    <div class="metric-card c-green"><div class="label">Migrados</div><div class="num">${migrados}</div></div>
+    <div class="metric-card c-teal"><div class="label">Em andamento</div><div class="num">${andamento}</div></div>
+    <div class="metric-card c-red"><div class="label">Cancelados</div><div class="num">${cancelados}</div></div>
+    <div class="metric-card c-amber"><div class="label">Pendentes</div><div class="num">${pendentes}</div></div>
     <div class="metric-card c-teal"><div class="label">Cartas enviadas</div><div class="num">${cartasEnviadas}</div></div>
+    <div class="metric-card c-blue"><div class="label">Torres prontas</div><div class="num">${torresProntasNoFiltro}</div></div>
   `;
 
   // Tabela detalhada, nome por nome
@@ -971,6 +1028,7 @@ function renderConsulta() {
 
   tabelaEl.innerHTML = html;
 }
+
 
 function copiarResumo() {
   const el = document.getElementById("resumoTexto");
