@@ -997,13 +997,41 @@ function renderConsulta() {
     <div class="metric-card c-blue"><div class="label">Torres prontas</div><div class="num">${torresProntasNoFiltro}</div></div>
   `;
 
-  // Tabela detalhada, nome por nome
+  // Tabela detalhada
   const tabelaEl = document.getElementById("consultaTabela");
   if (filtrados.length === 0) {
     tabelaEl.innerHTML = '<tr><td style="padding:20px; text-align:center; color:var(--grey);">Nenhum registro encontrado com esses filtros.</td></tr>';
     return;
   }
 
+  if (tipo === "torrePronta") {
+    // Tabela por torre (uma linha por torre, nao por cliente)
+    const porTorre = {};
+    filtrados.forEach(d => {
+      porTorre[d.torre] = porTorre[d.torre] || { regional: d.regional, qtd: 0 };
+      porTorre[d.torre].qtd++;
+    });
+
+    let html = `<tr style="background:var(--blue-dark);">
+      <th style="padding:10px; text-align:left; color:white; font-size:12px;">Torre</th>
+      <th style="padding:10px; text-align:left; color:white; font-size:12px;">Regional</th>
+      <th style="padding:10px; text-align:center; color:white; font-size:12px;">Clientes migrados</th>
+    </tr>`;
+
+    Object.entries(porTorre).sort(([a], [b]) => a.localeCompare(b)).forEach(([torre, info], i) => {
+      const bg = i % 2 === 0 ? "var(--grey-light)" : "white";
+      html += `<tr style="background:${bg};">
+        <td style="padding:9px 10px; font-weight:600;">${torre}</td>
+        <td style="padding:9px 10px;">${info.regional}</td>
+        <td style="padding:9px 10px; text-align:center;"><span class="tag-green" style="padding:3px 8px; border-radius:6px; font-size:11px; font-weight:700;">${info.qtd}</span></td>
+      </tr>`;
+    });
+
+    tabelaEl.innerHTML = html;
+    return;
+  }
+
+  // Tabela detalhada, nome por nome (demais filtros)
   let html = `<tr style="background:var(--blue-dark);">
     <th style="padding:10px; text-align:left; color:white; font-size:12px;">Cliente</th>
     <th style="padding:10px; text-align:left; color:white; font-size:12px;">Torre</th>
