@@ -427,7 +427,7 @@ async function saveData(showIndicator = true) {
 
 function updateClient(id, field, value) {
   const item = data.find(d => d.id === id);
-  if (item) { item[field] = value; saveData(); renderAll(); }
+  if (item) { item[field] = value; item.atualizadoEm = new Date().toISOString(); saveData(); renderAll(); }
 }
 
 function normalizar(txt) {
@@ -459,6 +459,7 @@ async function aplicarLote() {
     if (item) {
       if (u.status) item.status = u.status;
       if (u.obs !== undefined) item.obs = u.obs;
+      item.atualizadoEm = new Date().toISOString();
       atualizados++;
     } else {
       if (!u.regional || !u.torre || !u.cliente) {
@@ -472,6 +473,7 @@ async function aplicarLote() {
         regional: u.regional,
         status: u.status || "Pendente",
         obs: u.obs || "",
+        atualizadoEm: new Date().toISOString(),
       });
       criados++;
     }
@@ -671,6 +673,7 @@ function marcarCartaEnviada(id) {
   if (!dataInformada) return;
   item.cartaEnviada = true;
   item.dataEnvioCarta = dataInformada;
+  item.atualizadoEm = new Date().toISOString();
   saveData();
   renderAll();
 }
@@ -681,6 +684,7 @@ function desmarcarCartaEnviada(id) {
   if (!window.confirm("Desmarcar essa carta como enviada?")) return;
   item.cartaEnviada = false;
   item.dataEnvioCarta = "";
+  item.atualizadoEm = new Date().toISOString();
   saveData();
   renderAll();
 }
@@ -734,6 +738,39 @@ function renderResumo() {
     }
   });
 
+
+  // Atividade recente (semana e mes), com base em atualizadoEm
+  const agora = new Date();
+  const seteDias = new Date(agora); seteDias.setDate(agora.getDate() - 7);
+  const trintaDias = new Date(agora); trintaDias.setDate(agora.getDate() - 30);
+
+  const comData = data.filter(d => d.atualizadoEm);
+  const atualizadosSemana = comData.filter(d => new Date(d.atualizadoEm) >= seteDias);
+  const atualizadosMes = comData.filter(d => new Date(d.atualizadoEm) >= trintaDias);
+
+  function contarPorStatus(lista) {
+    const c = {};
+    lista.forEach(d => { c[d.status] = (c[d.status] || 0) + 1; });
+    return c;
+  }
+  function fmtContagem(c) {
+    const partes = [];
+    if (c["Concluído"]) partes.push(`${c["Concluído"]} migrado(s)/concluído(s)`);
+    if (c["Em andamento"]) partes.push(`${c["Em andamento"]} em andamento`);
+    if (c["Cancelado (sem alternativa)"]) partes.push(`${c["Cancelado (sem alternativa)"]} cancelado(s)`);
+    if (c["Pendente"]) partes.push(`${c["Pendente"]} pendente(s) atualizados`);
+    return partes.length > 0 ? partes.join(", ") : "nenhuma alteracao de status especifica";
+  }
+
+  const blocoAtividade = `
+    <div style="background: var(--teal-light); border: 1px solid var(--teal); border-radius: 10px; padding: 16px 20px; margin-bottom: 20px;">
+      <p style="font-weight:700; margin:0 0 10px 0; color: var(--blue-dark);">Atividade recente</p>
+      <p style="margin:0 0 6px 0;"><strong>Ultimos 7 dias:</strong> ${atualizadosSemana.length} atualizacao(oes) — ${fmtContagem(contarPorStatus(atualizadosSemana))}</p>
+      <p style="margin:0;"><strong>Ultimos 30 dias:</strong> ${atualizadosMes.length} atualizacao(oes) — ${fmtContagem(contarPorStatus(atualizadosMes))}</p>
+      ${comData.length < data.length ? `<p style="margin:8px 0 0 0; font-size:12px; color:var(--grey);">${data.length - comData.length} registro(s) ainda sem data de atualizacao registrada (criados antes desse recurso existir).</p>` : ""}
+    </div>
+  `;
+
   const dataAtual = new Date().toLocaleDateString("pt-BR");
   const fmt = (lista) => lista.length > 0
     ? `<br><span style="font-size:12px; color:var(--grey); font-weight:400;">${lista.join(", ")}</span>`
@@ -748,6 +785,7 @@ function renderResumo() {
   const texto = `
     <p><strong>Atualizado em ${dataAtual}</strong></p>
     <p>O projeto de migração conta com <strong>${totalTorres} torres</strong> e <strong>${total} clientes</strong> ao todo.</p>
+    ${blocoAtividade}
     <ul style="padding-left:20px; margin:0;">
       <li style="margin-bottom:10px;"><strong>${listaProntas.length}</strong> torre(s) já ${listaProntas.length === 1 ? "pode" : "podem"} ser desmontada(s) — todos os clientes já migrados.${fmt(listaProntas)}</li>
       <li style="margin-bottom:10px;"><strong>${listaMantidas.length}</strong> torre(s) mantida(s) ativa(s) por decisão operacional (não serão desmontadas).${fmt(listaMantidas)}</li>
