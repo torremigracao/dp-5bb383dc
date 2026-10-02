@@ -310,6 +310,34 @@ Para ADICIONAR um cliente/torre novo, inclua também "regional":
     <div class="view" id="view-resumo">
       <h2 class="section-title">Resumo executivo</h2>
       <p class="section-sub">Situação geral do projeto, atualizada automaticamente.</p>
+
+      <div class="list-card" style="margin-bottom:20px;">
+        <h3 style="margin:0 0 4px 0; font-size:16px; color:var(--blue-dark);">Consulta de clientes e torres</h3>
+        <p style="margin:0 0 16px 0; font-size:12px; color:var(--grey);">Busque por cliente, torre, regional ou tipo de informação.</p>
+
+        <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px;">
+          <input type="text" id="consultaBusca" placeholder="Nome do cliente ou da torre..." oninput="renderConsulta()" style="flex:2; min-width:200px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+          <select id="consultaRegional" onchange="renderConsulta()" style="flex:1; min-width:170px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;"><option value="">Todas as regionais</option></select>
+          <select id="consultaTipo" onchange="renderConsulta()" style="flex:1; min-width:210px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+            <option value="todos">Tudo</option>
+            <option value="cartaEnviada">Cartas enviadas</option>
+            <option value="cartaPendente">Cartas pendentes de envio</option>
+            <option value="torrePronta">Torres prontas p/ desmontar</option>
+            <option value="migrado">Clientes migrados</option>
+            <option value="andamento">Clientes em andamento</option>
+            <option value="cancelado">Clientes cancelados</option>
+            <option value="pendente">Clientes pendentes</option>
+          </select>
+          <button class="btn-ghost" onclick="limparConsulta()">Limpar filtros</button>
+        </div>
+
+        <div class="card-grid" id="consultaCards" style="margin-bottom:18px;"></div>
+
+        <div style="overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:13px;" id="consultaTabela"></table>
+        </div>
+      </div>
+
       <div class="list-card">
         <div id="resumoTexto" style="font-size:14px; line-height:1.8; color:#14162B;"></div>
         <div style="margin-top:16px; display:flex; gap:10px;">
@@ -803,6 +831,8 @@ function renderResumo() {
   const el = document.getElementById("resumoTexto");
   if (el) el.innerHTML = texto;
   atualizarAtividadeResumo();
+  popularFiltroRegionalConsulta();
+  renderConsulta();
 }
 
 function atualizarAtividadeResumo() {
@@ -844,6 +874,102 @@ function atualizarAtividadeResumo() {
     <p style="margin:0 0 6px 0;"><strong>${label}:</strong> ${filtrados.length} atualização(ões) — ${fmtContagem(contagem)}</p>
     ${comData.length < data.length ? `<p style="margin:8px 0 0 0; font-size:12px; color:var(--grey);">${data.length - comData.length} registro(s) ainda sem data de atualização registrada (criados antes desse recurso existir).</p>` : ""}
   `;
+}
+
+function popularFiltroRegionalConsulta() {
+  const sel = document.getElementById("consultaRegional");
+  if (!sel) return;
+  const atual = sel.value;
+  sel.innerHTML = '<option value="">Todas as regionais</option>';
+  const regionais = [...new Set(data.map(d => d.regional))].sort();
+  regionais.forEach(r => {
+    const opt = document.createElement("option");
+    opt.value = r; opt.textContent = r;
+    sel.appendChild(opt);
+  });
+  sel.value = atual;
+}
+
+function limparConsulta() {
+  document.getElementById("consultaBusca").value = "";
+  document.getElementById("consultaRegional").value = "";
+  document.getElementById("consultaTipo").value = "todos";
+  renderConsulta();
+}
+
+function renderConsulta() {
+  const buscaEl = document.getElementById("consultaBusca");
+  const regionalEl = document.getElementById("consultaRegional");
+  const tipoEl = document.getElementById("consultaTipo");
+  if (!buscaEl || !regionalEl || !tipoEl) return;
+
+  const busca = buscaEl.value.toLowerCase();
+  const regional = regionalEl.value;
+  const tipo = tipoEl.value;
+
+  // Torres 100% concluidas (para o filtro "torrePronta")
+  const torresMap = {};
+  data.forEach(d => { torresMap[d.torre] = torresMap[d.torre] || []; torresMap[d.torre].push(d.status); });
+  const torresProntasSet = new Set(
+    Object.entries(torresMap).filter(([t, sts]) => sts.every(s => s === "Concluído")).map(([t]) => t)
+  );
+
+  let filtrados = data.filter(d => {
+    const matchBusca = !busca || d.cliente.toLowerCase().includes(busca) || d.torre.toLowerCase().includes(busca);
+    const matchRegional = !regional || d.regional === regional;
+    let matchTipo = true;
+    if (tipo === "cartaEnviada") matchTipo = !!d.cartaEnviada;
+    else if (tipo === "cartaPendente") matchTipo = d.status === "Cancelado (sem alternativa)" && !d.cartaEnviada;
+    else if (tipo === "torrePronta") matchTipo = torresProntasSet.has(d.torre);
+    else if (tipo === "migrado") matchTipo = d.status === "Concluído";
+    else if (tipo === "andamento") matchTipo = d.status === "Em andamento";
+    else if (tipo === "cancelado") matchTipo = d.status === "Cancelado (sem alternativa)";
+    else if (tipo === "pendente") matchTipo = d.status === "Pendente";
+    return matchBusca && matchRegional && matchTipo;
+  });
+
+  // Cards de resumo
+  const torresDistintas = new Set(filtrados.map(d => d.torre)).size;
+  const migrados = filtrados.filter(d => d.status === "Concluído").length;
+  const cartasEnviadas = filtrados.filter(d => d.cartaEnviada).length;
+
+  document.getElementById("consultaCards").innerHTML = `
+    <div class="metric-card c-blue"><div class="label">Registros encontrados</div><div class="num">${filtrados.length}</div></div>
+    <div class="metric-card c-blue"><div class="label">Torres envolvidas</div><div class="num">${torresDistintas}</div></div>
+    <div class="metric-card c-green"><div class="label">Já migrados</div><div class="num">${migrados}</div></div>
+    <div class="metric-card c-teal"><div class="label">Cartas enviadas</div><div class="num">${cartasEnviadas}</div></div>
+  `;
+
+  // Tabela detalhada, nome por nome
+  const tabelaEl = document.getElementById("consultaTabela");
+  if (filtrados.length === 0) {
+    tabelaEl.innerHTML = '<tr><td style="padding:20px; text-align:center; color:var(--grey);">Nenhum registro encontrado com esses filtros.</td></tr>';
+    return;
+  }
+
+  let html = `<tr style="background:var(--blue-dark);">
+    <th style="padding:10px; text-align:left; color:white; font-size:12px;">Cliente</th>
+    <th style="padding:10px; text-align:left; color:white; font-size:12px;">Torre</th>
+    <th style="padding:10px; text-align:left; color:white; font-size:12px;">Regional</th>
+    <th style="padding:10px; text-align:center; color:white; font-size:12px;">Status</th>
+    <th style="padding:10px; text-align:center; color:white; font-size:12px;">Carta</th>
+    <th style="padding:10px; text-align:left; color:white; font-size:12px;">Observação</th>
+  </tr>`;
+
+  filtrados.forEach((d, i) => {
+    const bg = i % 2 === 0 ? "var(--grey-light)" : "white";
+    const cartaInfo = d.cartaEnviada ? `Enviada ${d.dataEnvioCarta || ""}` : (d.status === "Cancelado (sem alternativa)" ? "Pendente" : "—");
+    html += `<tr style="background:${bg};">
+      <td style="padding:9px 10px; font-weight:600;">${d.cliente}</td>
+      <td style="padding:9px 10px;">${d.torre}</td>
+      <td style="padding:9px 10px;">${d.regional}</td>
+      <td style="padding:9px 10px; text-align:center;"><span class="${statusClass(d.status)}" style="padding:3px 8px; border-radius:6px; font-size:11px; font-weight:700;">${d.status}</span></td>
+      <td style="padding:9px 10px; text-align:center; font-size:12px;">${cartaInfo}</td>
+      <td style="padding:9px 10px; font-size:12px; color:var(--grey);">${d.obs || ""}</td>
+    </tr>`;
+  });
+
+  tabelaEl.innerHTML = html;
 }
 
 function copiarResumo() {
