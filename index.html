@@ -323,6 +323,7 @@ Para ADICIONAR um cliente/torre novo, inclua também "regional":
             <option value="cartaEnviada">Cartas enviadas</option>
             <option value="cartaPendente">Cartas pendentes de envio</option>
             <option value="torrePronta">Torres prontas p/ desmontar</option>
+            <option value="torrePendente">Torres pendentes (sem atualização)</option>
             <option value="migrado">Clientes migrados</option>
             <option value="andamento">Clientes em andamento</option>
             <option value="cancelado">Clientes cancelados</option>
@@ -922,6 +923,14 @@ function renderConsulta() {
       .map(([t]) => t)
   );
 
+  // Torres 100% pendentes (sem nenhuma atualizacao) — mesma logica de exclusao
+  const torresPendentesSet = new Set(
+    Object.entries(torresMap)
+      .filter(([t, sts]) => sts.every(s => s === "Pendente"))
+      .filter(([t]) => !TORRES_MANTIDAS_ATIVAS.includes(t) && !TORRES_PARTICULARES.includes(t))
+      .map(([t]) => t)
+  );
+
   // Filtro de periodo (baseado em atualizadoEm)
   let desde = null, ate = null;
   if (periodoTipo !== "tudo") {
@@ -945,6 +954,7 @@ function renderConsulta() {
     if (tipo === "cartaEnviada") matchTipo = !!d.cartaEnviada;
     else if (tipo === "cartaPendente") matchTipo = d.status === "Cancelado (sem alternativa)" && !d.cartaEnviada;
     else if (tipo === "torrePronta") matchTipo = torresProntasSet.has(d.torre);
+    else if (tipo === "torrePendente") matchTipo = torresPendentesSet.has(d.torre);
     else if (tipo === "migrado") matchTipo = d.status === "Concluído";
     else if (tipo === "andamento") matchTipo = d.status === "Em andamento";
     else if (tipo === "cancelado") matchTipo = d.status === "Cancelado (sem alternativa)";
@@ -969,6 +979,10 @@ function renderConsulta() {
     destaqueEl.innerHTML = torresEncontradas.length > 0
       ? `<div style="background:var(--green-bg); border:1px solid #9AD9B5; border-radius:8px; padding:10px 14px; font-size:13px;"><strong>Torre(s) pronta(s) para desmontar:</strong> ${torresEncontradas.join(", ")}</div>`
       : `<div style="background:var(--amber-bg); border:1px solid #E8D28A; border-radius:8px; padding:10px 14px; font-size:13px;">Nenhuma torre 100% pronta para desmontar com esses filtros.</div>`;
+  } else if (tipo === "torrePendente") {
+    destaqueEl.innerHTML = torresEncontradas.length > 0
+      ? `<div style="background:var(--amber-bg); border:1px solid #E8D28A; border-radius:8px; padding:10px 14px; font-size:13px;"><strong>Torre(s) pendente(s), sem nenhuma atualização:</strong> ${torresEncontradas.join(", ")}</div>`
+      : `<div style="background:var(--green-bg); border:1px solid #9AD9B5; border-radius:8px; padding:10px 14px; font-size:13px;">Nenhuma torre totalmente pendente com esses filtros.</div>`;
   } else if (torresEncontradas.length > 0 && torresEncontradas.length <= 8) {
     destaqueEl.innerHTML = `<div style="background:var(--grey-light); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:13px;"><strong>Torre(s):</strong> ${torresEncontradas.join(", ")}</div>`;
   } else {
@@ -1003,7 +1017,7 @@ function renderConsulta() {
     return;
   }
 
-  if (tipo === "torrePronta") {
+  if (tipo === "torrePronta" || tipo === "torrePendente") {
     // Tabela por torre (uma linha por torre, nao por cliente)
     const porTorre = {};
     filtrados.forEach(d => {
@@ -1011,10 +1025,13 @@ function renderConsulta() {
       porTorre[d.torre].qtd++;
     });
 
+    const corTag = tipo === "torrePronta" ? "tag-green" : "tag-amber";
+    const labelCol = tipo === "torrePronta" ? "Clientes migrados" : "Clientes pendentes";
+
     let html = `<tr style="background:var(--blue-dark);">
       <th style="padding:10px; text-align:left; color:white; font-size:12px;">Torre</th>
       <th style="padding:10px; text-align:left; color:white; font-size:12px;">Regional</th>
-      <th style="padding:10px; text-align:center; color:white; font-size:12px;">Clientes migrados</th>
+      <th style="padding:10px; text-align:center; color:white; font-size:12px;">${labelCol}</th>
     </tr>`;
 
     Object.entries(porTorre).sort(([a], [b]) => a.localeCompare(b)).forEach(([torre, info], i) => {
@@ -1022,7 +1039,7 @@ function renderConsulta() {
       html += `<tr style="background:${bg};">
         <td style="padding:9px 10px; font-weight:600;">${torre}</td>
         <td style="padding:9px 10px;">${info.regional}</td>
-        <td style="padding:9px 10px; text-align:center;"><span class="tag-green" style="padding:3px 8px; border-radius:6px; font-size:11px; font-weight:700;">${info.qtd}</span></td>
+        <td style="padding:9px 10px; text-align:center;"><span class="${corTag}" style="padding:3px 8px; border-radius:6px; font-size:11px; font-weight:700;">${info.qtd}</span></td>
       </tr>`;
     });
 
