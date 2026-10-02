@@ -1169,7 +1169,7 @@ function openCartaModal(id) {
   cartaClienteAtual = item;
   const hoje = new Date();
   const desligamento = new Date(hoje);
-  desligamento.setDate(desligamento.getDate() + 30);
+  desligamento.setDate(desligamento.getDate() + 35);
   const iso = desligamento.toISOString().split("T")[0];
   document.getElementById("dataDesligamento").value = iso;
   renderCarta(item, formatarDataBR(iso));
@@ -1189,7 +1189,7 @@ function renderCarta(item, dataFormatada) {
     <p>Prezado(a) amigo(a) e cliente <strong>${item.cliente.toUpperCase()}</strong>,</p>
     <p>Informamos que a torre de transmissão que atende sua região (${item.torre}) será desativada. Após análise técnica, infelizmente não identificamos viabilidade para migração do seu serviço para outra torre ou para nossa rede de fibra óptica.</p>
     <p>Por esse motivo, será necessário encerrar o serviço no seu endereço.</p>
-    <p>Para que você tenha tempo de contratar outro provedor e não fique sem conexão, estamos comunicando com 30 (trinta) dias de antecedência. O desligamento está previsto para <strong>${dataFormatada}</strong>.</p>
+    <p>Para que você tenha tempo de contratar outro provedor e não fique sem conexão, estamos comunicando com 35 (trinta e cinco) dias de antecedência. O desligamento está previsto para <strong>${dataFormatada}</strong>.</p>
     <p>Como o encerramento ocorre por iniciativa da Uni Internet devido à impossibilidade técnica de continuidade do serviço, <strong>não haverá cobrança de multa de fidelidade</strong>, nem cobranças referentes ao período posterior ao desligamento.</p>
     <p>Caso existam equipamentos da Uni Internet em comodato (antena, roteador ou outro aparelho), nossa equipe entrará em contato para agendar a retirada sem nenhum custo.</p>
     <p>Lamentamos o transtorno e esperamos poder atendê-lo(a) novamente no futuro.</p>
