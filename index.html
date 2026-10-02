@@ -911,11 +911,15 @@ function renderConsulta() {
   const tipo = tipoEl.value;
   const periodoTipo = periodoEl.value;
 
-  // Torres 100% concluidas (para o filtro "torrePronta")
+  // Torres 100% concluidas (para o filtro "torrePronta") — exclui as mantidas ativas e particulares,
+  // que podem ter status "Concluído" mas NAO vao ser desmontadas de fato
   const torresMap = {};
   data.forEach(d => { torresMap[d.torre] = torresMap[d.torre] || []; torresMap[d.torre].push(d.status); });
   const torresProntasSet = new Set(
-    Object.entries(torresMap).filter(([t, sts]) => sts.every(s => s === "Concluído")).map(([t]) => t)
+    Object.entries(torresMap)
+      .filter(([t, sts]) => sts.every(s => s === "Concluído"))
+      .filter(([t]) => !TORRES_MANTIDAS_ATIVAS.includes(t) && !TORRES_PARTICULARES.includes(t))
+      .map(([t]) => t)
   );
 
   // Filtro de periodo (baseado em atualizadoEm)
