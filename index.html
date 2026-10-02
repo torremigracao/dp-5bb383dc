@@ -1031,6 +1031,57 @@ function renderConsulta() {
     return;
   }
 
+  if (tipo === "todos") {
+    // Resumo total categorizado (em vez de listar cliente por cliente)
+    const torresMapFiltro = {};
+    filtrados.forEach(d => {
+      torresMapFiltro[d.torre] = torresMapFiltro[d.torre] || [];
+      torresMapFiltro[d.torre].push(d);
+    });
+
+    const catProntas = [], catMantidas = [], catParticulares = [], catCanceladasTorre = [], catPendentesTorre = [], catMistas = [];
+    Object.entries(torresMapFiltro).forEach(([torre, clientes]) => {
+      const sts = clientes.map(c => c.status);
+      if (TORRES_MANTIDAS_ATIVAS.includes(torre)) catMantidas.push(torre);
+      else if (TORRES_PARTICULARES.includes(torre)) catParticulares.push(torre);
+      else if (sts.every(s => s === "Concluído")) catProntas.push(torre);
+      else if (sts.every(s => s === "Cancelado (sem alternativa)")) catCanceladasTorre.push(torre);
+      else if (sts.every(s => s === "Pendente")) catPendentesTorre.push(torre);
+      else catMistas.push(torre);
+    });
+
+    const nomesCliente = (lista) => lista.map(d => `${d.cliente} (${d.torre})`).join(", ");
+    const bloco = (titulo, cor, torres, extraTexto) => `
+      <div style="margin-bottom:14px; padding:12px 16px; background:white; border:1px solid var(--border); border-radius:8px;">
+        <p style="margin:0 0 4px 0; font-weight:700; color:${cor};">${titulo}${extraTexto ? " — " + extraTexto : ""}</p>
+        ${torres.length > 0 ? `<p style="margin:0; font-size:12px; color:var(--grey);">${torres.join(", ")}</p>` : `<p style="margin:0; font-size:12px; color:var(--grey);">Nenhuma nessa condição.</p>`}
+      </div>`;
+
+    const migradosList = filtrados.filter(d => d.status === "Concluído");
+    const andamentoList = filtrados.filter(d => d.status === "Em andamento");
+    const canceladosList = filtrados.filter(d => d.status === "Cancelado (sem alternativa)");
+    const pendentesList = filtrados.filter(d => d.status === "Pendente");
+
+    let resumoHtml = `
+      ${bloco("Torres prontas para desmontar", "#0F6E56", catProntas)}
+      ${bloco("Torres mantidas ativas (decisão operacional)", "#1A3FBF", catMantidas)}
+      ${bloco("Torres particulares (de terceiros)", "#1A3FBF", catParticulares)}
+      ${bloco("Torres 100% canceladas (aguardando carta)", "#B00020", catCanceladasTorre)}
+      ${bloco("Torres sem nenhuma atualização", "#7A6A00", catPendentesTorre)}
+      ${catMistas.length > 0 ? bloco("Torres em processo (status misto)", "#5B6B8C", catMistas) : ""}
+      <div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--border);">
+        <p style="margin:0 0 10px 0; font-weight:700; color:var(--blue-dark);">Clientes por situação</p>
+        <p style="margin:0 0 8px 0; font-size:13px;"><strong style="color:#0F6E56;">Migrados (${migradosList.length}):</strong> <span style="color:var(--grey); font-size:12px;">${nomesCliente(migradosList) || "nenhum"}</span></p>
+        <p style="margin:0 0 8px 0; font-size:13px;"><strong style="color:#0E8A78;">Em andamento (${andamentoList.length}):</strong> <span style="color:var(--grey); font-size:12px;">${nomesCliente(andamentoList) || "nenhum"}</span></p>
+        <p style="margin:0 0 8px 0; font-size:13px;"><strong style="color:#B00020;">Cancelados (${canceladosList.length}):</strong> <span style="color:var(--grey); font-size:12px;">${nomesCliente(canceladosList) || "nenhum"}</span></p>
+        <p style="margin:0; font-size:13px;"><strong style="color:#7A6A00;">Pendentes (${pendentesList.length}):</strong> <span style="color:var(--grey); font-size:12px;">${nomesCliente(pendentesList) || "nenhum"}</span></p>
+      </div>
+    `;
+
+    tabelaEl.innerHTML = `<tr><td colspan="6" style="padding:14px; font-size:13px;">${resumoHtml}</td></tr>`;
+    return;
+  }
+
   // Tabela detalhada, nome por nome (demais filtros)
   let html = `<tr style="background:var(--blue-dark);">
     <th style="padding:10px; text-align:left; color:white; font-size:12px;">Cliente</th>
