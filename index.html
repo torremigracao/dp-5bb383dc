@@ -1070,10 +1070,10 @@ function renderConsulta() {
       ${catMistas.length > 0 ? bloco("Torres em processo (status misto)", "#5B6B8C", catMistas) : ""}
       <div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--border);">
         <p style="margin:0 0 10px 0; font-weight:700; color:var(--blue-dark);">Clientes por situação</p>
-        <p style="margin:0 0 8px 0; font-size:13px;"><strong style="color:#0F6E56;">Migrados (${migradosList.length}):</strong> <span style="color:var(--grey); font-size:12px;">${nomesCliente(migradosList) || "nenhum"}</span></p>
-        <p style="margin:0 0 8px 0; font-size:13px;"><strong style="color:#0E8A78;">Em andamento (${andamentoList.length}):</strong> <span style="color:var(--grey); font-size:12px;">${nomesCliente(andamentoList) || "nenhum"}</span></p>
-        <p style="margin:0 0 8px 0; font-size:13px;"><strong style="color:#B00020;">Cancelados (${canceladosList.length}):</strong> <span style="color:var(--grey); font-size:12px;">${nomesCliente(canceladosList) || "nenhum"}</span></p>
-        <p style="margin:0; font-size:13px;"><strong style="color:#7A6A00;">Pendentes (${pendentesList.length}):</strong> <span style="color:var(--grey); font-size:12px;">${nomesCliente(pendentesList) || "nenhum"}</span></p>
+        <p style="margin:0 0 8px 0; font-size:14px;"><strong style="color:#0F6E56;">Migrados:</strong> ${migradosList.length}</p>
+        <p style="margin:0 0 8px 0; font-size:14px;"><strong style="color:#0E8A78;">Em andamento:</strong> ${andamentoList.length}</p>
+        <p style="margin:0 0 8px 0; font-size:14px;"><strong style="color:#B00020;">Cancelados:</strong> ${canceladosList.length}</p>
+        <p style="margin:0; font-size:14px;"><strong style="color:#7A6A00;">Pendentes:</strong> ${pendentesList.length}</p>
       </div>
     `;
 
