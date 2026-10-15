@@ -431,6 +431,76 @@ const GERENTES_POR_REGIONAL = {
   "São Francisco": "Graziele Gonçalves",
 };
 
+// Clientes de torres novas (distrato) — entram sozinhos no painel, sem duplicar
+// (quando o mesmo nome aparece 2x na mesma torre, sao 2 contratos e entram 2 registros)
+const NOVOS_REGISTROS = [
+  { cliente: "Juliana De Souza Purcino", torre: "UNI-VEAI-AFS", regional: "Machadinho D'Oeste" },
+  { cliente: "Celio Bevitorio", torre: "UNI-VEAI-AFS", regional: "Machadinho D'Oeste" },
+  { cliente: "Gilcimar Martins Da Costa", torre: "UNI-VEAI-AFS", regional: "Machadinho D'Oeste" },
+  { cliente: "Hosana Maria De Souza Brogio", torre: "UNI-VEAI-AFS", regional: "Machadinho D'Oeste" },
+  { cliente: "Jose Mello De Barros", torre: "UNI-VEAI-AFS", regional: "Machadinho D'Oeste" },
+  { cliente: "Kate Mayone Mutz De Oliveira", torre: "UNI-VEAI-AFS", regional: "Machadinho D'Oeste" },
+  { cliente: "Leopoldo Schaefer Junior", torre: "UNI-VEAI-AFS", regional: "Machadinho D'Oeste" },
+  { cliente: "Angella Gabriela Silva De Oliveira", torre: "UNI-MACH-RRD", regional: "Machadinho D'Oeste" },
+  { cliente: "Caldineia Alves Dos Santos", torre: "UNI-MACH-RRD", regional: "Machadinho D'Oeste" },
+  { cliente: "Cosme Campanari Da Silva", torre: "UNI-MACH-RRD", regional: "Machadinho D'Oeste" },
+  { cliente: "Edna Moura De Moraes", torre: "UNI-MACH-RRD", regional: "Machadinho D'Oeste" },
+  { cliente: "Gedeao Chaves Alves", torre: "UNI-MACH-RRD", regional: "Machadinho D'Oeste" },
+  { cliente: "Maria De Fatima Dos Santos De Andrade", torre: "UNI-MACH-RRD", regional: "Machadinho D'Oeste" },
+  { cliente: "Maria Lucia Rodrigues Dourado", torre: "UNI-MACH-RRD", regional: "Machadinho D'Oeste" },
+  { cliente: "Moacir De Paula Souza", torre: "UNI-MACH-RRD", regional: "Machadinho D'Oeste" },
+  { cliente: "Reginaldo Dos Santos Pereira", torre: "UNI-MACH-RRD", regional: "Machadinho D'Oeste" },
+  { cliente: "Ronildo Albertini Freitas", torre: "UNI-AFL-JLO", regional: "Alta Floresta" },
+  { cliente: "Julio Sergio Eller", torre: "UNI-AFL-JLO", regional: "Alta Floresta" },
+  { cliente: "Lindomar Machado Loiola", torre: "UNI-AFL-JLO", regional: "Alta Floresta" },
+  { cliente: "Helio Eller", torre: "UNI-AFL-JLO", regional: "Alta Floresta" },
+  { cliente: "Samuel Fehlberg", torre: "UNI-AFL-JLO", regional: "Alta Floresta" },
+  { cliente: "Ronildo Albertini Freitas", torre: "UNI-AFL-JLO", regional: "Alta Floresta" },
+  { cliente: "Robson Liick", torre: "UNI-AFL-RNK", regional: "Alta Floresta" },
+  { cliente: "Erwin Luck", torre: "UNI-AFL-RNK", regional: "Alta Floresta" },
+  { cliente: "Felipe Royer", torre: "UNI-AFL-RNK", regional: "Alta Floresta" },
+  { cliente: "Renan Krause", torre: "UNI-AFL-RNK", regional: "Alta Floresta" },
+  { cliente: "Eliandro Liick", torre: "UNI-AFL-RNK", regional: "Alta Floresta" },
+  { cliente: "Rosa Maria Lambrecht", torre: "UNI-AFL-RNK", regional: "Alta Floresta" },
+  { cliente: "Rosenilda Borges Maciel", torre: "UNI-AFL-ASP", regional: "Alta Floresta" },
+  { cliente: "Daiane Maia", torre: "UNI-AFL-ASP", regional: "Alta Floresta" },
+  { cliente: "Marcelo Fernando De Souza", torre: "UNI-AFL-ASP", regional: "Alta Floresta" },
+  { cliente: "Jair Pires Gonçalves", torre: "UNI-AFL-ASP", regional: "Alta Floresta" },
+  { cliente: "Edneia Abreu Lucas De Oliveira", torre: "UNI-AFL-ASP", regional: "Alta Floresta" },
+  { cliente: "Aldo Luis Barbosa", torre: "UNI-AFL-ASP", regional: "Alta Floresta" },
+];
+
+function chaveRegistro(cliente, torre) {
+  return (cliente || "").trim().toLowerCase().replace(/\s+/g, " ") + "|" + (torre || "").trim().toLowerCase();
+}
+
+function garantirNovosRegistros() {
+  // conta quantos registros de cada chave ja existem e so adiciona a diferenca
+  const jaExistem = {};
+  data.forEach(d => { const k = chaveRegistro(d.cliente, d.torre); jaExistem[k] = (jaExistem[k] || 0) + 1; });
+  const faltando = [];
+  NOVOS_REGISTROS.forEach(n => {
+    const k = chaveRegistro(n.cliente, n.torre);
+    if (jaExistem[k] > 0) { jaExistem[k]--; } else { faltando.push(n); }
+  });
+  if (faltando.length === 0) return false;
+  let proximoId = data.length > 0 ? Math.max(...data.map(d => d.id)) + 1 : 1;
+  const agora = new Date().toISOString();
+  faltando.forEach(n => {
+    data.push({
+      id: proximoId++,
+      cliente: n.cliente,
+      torre: n.torre,
+      regional: n.regional,
+      status: "Cancelado (sem alternativa)",
+      obs: "Sem viabilidade de migração para outra torre ou para a rede de fibra.",
+      atualizadoEm: agora,
+    });
+  });
+  saveData(false);
+  return true;
+}
+
 function statusClass(status) { return "status-" + status.split(" ")[0].replace("í", "i"); }
 
 function conectarFirestore() {
@@ -438,6 +508,7 @@ function conectarFirestore() {
     if (salvandoLocalmente) { salvandoLocalmente = false; return; }
     if (doc.exists && doc.data().items) {
       data = doc.data().items;
+      garantirNovosRegistros();
     } else {
       data = SEED_DATA;
       DOC_REF.set({ items: SEED_DATA, atualizadoEm: new Date().toISOString() });
