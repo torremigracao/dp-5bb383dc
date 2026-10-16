@@ -162,6 +162,10 @@
   .btn-sair:hover { background: rgba(255,255,255,0.08); color: white; }
   .banner-aviso { display: none; background: var(--red-bg); color: var(--red-text); border: 1px solid #F5B8B8; border-radius: 10px; padding: 12px 16px; font-size: 13px; font-weight: 700; margin-bottom: 14px; }
   .meta-alt { font-size: 10px; color: var(--grey); margin-top: 4px; font-weight: 400; }
+  .user-box .papel { font-size: 11px; color: var(--teal); font-weight: 700; margin: -4px 0 8px; }
+  .sel-papel { font-size: 11px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; margin-right: 4px; }
+  details.list-card > summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--blue-dark); }
+  body.papel-leitor .btn-torre, body.papel-leitor .btn-carta, body.papel-leitor .acao-col, body.papel-leitor .acoes-edicao { display: none !important; }
   .client-row { display: grid; grid-template-columns: minmax(160px, 1.4fr) 150px 2fr; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--border); align-items: start; }
   .client-row .name { font-size: 12px; padding-top: 8px; font-weight: 500; }
   .client-row select { width: 100%; padding: 6px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; border: 1px solid var(--border); cursor: pointer; }
@@ -293,7 +297,8 @@
     <div class="nav-item" data-view="regionais" onclick="switchView('regionais', this)"><span class="dot"></span> Regionais e torres</div>
     <div class="nav-item" data-view="cartas" onclick="switchView('cartas', this)"><span class="dot"></span> Cartas de distrato<span class="badge" id="badgeCartas">0</span></div>
     <div class="nav-item" data-view="finalizados" onclick="switchView('finalizados', this)"><span class="dot"></span> Finalizados</div>
-    <div class="nav-item" data-view="lote" onclick="switchView('lote', this)"><span class="dot"></span> Atualizar em lote</div>
+    <div class="nav-item" data-view="desmontagem" onclick="switchView('desmontagem', this)"><span class="dot"></span> Desmontagem</div>
+    <div class="nav-item" data-view="lote" id="navLote" onclick="switchView('lote', this)"><span class="dot"></span> Atualizar em lote</div>
     <div class="nav-item" data-view="resumo" onclick="switchView('resumo', this)"><span class="dot"></span> Resumo</div>
     <div class="nav-item" data-view="historico" onclick="switchView('historico', this)"><span class="dot"></span> Histórico</div>
     <div class="nav-item" data-view="usuarios" id="navUsuarios" style="display:none;" onclick="switchView('usuarios', this)"><span class="dot"></span> Usuários<span class="badge" id="badgeUsuarios" style="display:none;">0</span></div>
@@ -302,6 +307,7 @@
       <div class="user-box" id="userBox" style="display:none;">
         <div>Conectado como</div>
         <div class="nome" id="userNome"></div>
+        <div class="papel" id="userPapel"></div>
         <button class="btn-sair" onclick="sairDaConta()">Sair</button>
       </div>
       Dados salvos automaticamente
@@ -402,6 +408,32 @@ Para ADICIONAR um cliente/torre novo, inclua também "regional":
           <button class="btn-ghost" onclick="document.getElementById('loteInput').value=''; document.getElementById('loteResultado').innerHTML='';">Limpar</button>
         </div>
         <div id="loteResultado" style="margin-top:14px; font-size:13px;"></div>
+      </div>
+    </div>
+
+    <div class="view" id="view-desmontagem">
+      <h2 class="section-title">Desmontagem de torres</h2>
+      <p class="section-sub">Marque as torres que já foram desmontadas. Dá para marcar várias de uma vez.</p>
+      <div class="list-card" id="desmControles" style="margin-bottom:16px;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <input type="text" id="desmBusca" placeholder="Buscar torre ou regional..." oninput="renderDesmontagem()" style="flex:1; min-width:200px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+          <label for="desmData" style="font-size:12px; font-weight:700;">Data da desmontagem</label>
+          <input type="date" id="desmData" style="padding:8px 10px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+          <button class="btn-primary" id="btnDesmMarcar" onclick="marcarTorresSelecionadas()">Marcar selecionadas como desmontadas</button>
+          <span id="desmContador" style="font-size:12px; color:var(--grey);"></span>
+        </div>
+      </div>
+      <div class="list-card" style="margin-bottom:16px;">
+        <h3 style="margin:0 0 10px 0; font-size:15px; color:var(--blue-dark);">Prontas para desmontar</h3>
+        <div id="desmProntas"></div>
+      </div>
+      <details class="list-card" style="margin-bottom:16px;">
+        <summary id="desmOutrasTitulo">Outras torres</summary>
+        <div id="desmOutras"></div>
+      </details>
+      <div class="list-card">
+        <h3 id="desmFeitasTitulo" style="margin:0 0 10px 0; font-size:15px; color:var(--blue-dark);">Já desmontadas</h3>
+        <div id="desmFeitas"></div>
       </div>
     </div>
 
@@ -580,6 +612,9 @@ function parseDataBR(s) {
   return (dt.getFullYear() === +m[3] && dt.getMonth() === +m[2] - 1 && dt.getDate() === +m[1]) ? dt : null;
 }
 function marcarTorreDesmontada(torre) {
+  if (!exigirEdicao()) return;
+  const avisos = motivosDeAviso(torre);
+  if (avisos.length && !window.confirm("Atenção:\n" + avisos.join("\n") + "\n\nMarcar mesmo assim?")) return;
   const hoje = new Date().toLocaleDateString("pt-BR");
   const informada = window.prompt(`Data em que a torre ${torre} foi desmontada (DD/MM/AAAA):`, hoje);
   if (informada === null || informada.trim() === "") return;
@@ -590,9 +625,117 @@ function marcarTorreDesmontada(torre) {
   renderAll();
 }
 function desmarcarTorreDesmontada(torre) {
+  if (!exigirEdicao()) return;
   if (!window.confirm(`Desfazer a marcação de desmontada da torre ${torre}?`)) return;
   data.forEach(d => { if (d.torre === torre) { d.torreDesmontada = false; d.dataDesmontagem = ""; d.desmontadaPor = ""; } });
   registrarHistorico("Marcação de desmontada desfeita", "", torre, "");
+  saveData();
+  renderAll();
+}
+
+// ===== Tela "Desmontagem": marcar varias torres de uma vez =====
+const selecionadasDesm = new Set();
+
+function dataHojeISO() {
+  const h = new Date();
+  return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, "0")}-${String(h.getDate()).padStart(2, "0")}`;
+}
+function resumoTorre(torre) {
+  const regs = data.filter(d => d.torre === torre);
+  const cont = {};
+  regs.forEach(d => { cont[d.status] = (cont[d.status] || 0) + 1; });
+  return { qtd: regs.length, cont: cont, regional: regs.length ? regs[0].regional : "" };
+}
+function textoSituacaoTorre(cont) {
+  const nomes = { "Concluído": "concluído(s)", "Em andamento": "em andamento", "Pendente": "pendente(s)", "Cancelado (sem alternativa)": "cancelado(s)" };
+  return Object.keys(nomes).filter(k => cont[k]).map(k => `${cont[k]} ${nomes[k]}`).join(" · ") || "—";
+}
+// motivos para pedir confirmacao antes de marcar uma torre como desmontada
+function motivosDeAviso(torre) {
+  const cont = resumoTorre(torre).cont;
+  const m = [];
+  if (TORRES_MANTIDAS_ATIVAS.includes(torre)) m.push(`• ${torre}: está marcada como torre mantida ativa (não deveria ser desmontada).`);
+  if (TORRES_PARTICULARES.includes(torre)) m.push(`• ${torre}: é uma torre particular (de terceiros), ainda em tratativa.`);
+  const pend = cont["Pendente"] || 0, and = cont["Em andamento"] || 0;
+  if (pend || and) m.push(`• ${torre}: ainda tem ${[pend ? pend + " cliente(s) pendente(s)" : "", and ? and + " em andamento" : ""].filter(Boolean).join(" e ")}.`);
+  return m;
+}
+function toggleTorreDesm(torre, marcado) {
+  if (marcado) selecionadasDesm.add(torre); else selecionadasDesm.delete(torre);
+  atualizarContadorDesm();
+}
+function atualizarContadorDesm() {
+  const el = document.getElementById("desmContador");
+  if (el) el.textContent = selecionadasDesm.size ? `${selecionadasDesm.size} selecionada(s)` : "";
+}
+
+function renderDesmontagem() {
+  const elProntas = document.getElementById("desmProntas");
+  if (!elProntas) return;
+  const edita = podeEditar();
+  document.getElementById("desmControles").style.display = edita ? "block" : "none";
+  const dataEl = document.getElementById("desmData");
+  if (!dataEl.value) dataEl.value = dataHojeISO();
+  const busca = (document.getElementById("desmBusca").value || "").toLowerCase();
+  const torres = [...new Set(data.map(d => d.torre))].sort();
+  [...selecionadasDesm].forEach(t => { if (!torres.includes(t) || torreEstaDesmontada(t)) selecionadasDesm.delete(t); });
+  const filtra = t => !busca || t.toLowerCase().includes(busca) || resumoTorre(t).regional.toLowerCase().includes(busca);
+
+  const prontas = torres.filter(t => torreProntaParaDesmontar(t) && filtra(t));
+  const outras = torres.filter(t => !torreProntaParaDesmontar(t) && !torreEstaDesmontada(t) && filtra(t));
+  const feitas = torres.filter(t => torreEstaDesmontada(t) && filtra(t)).sort((a, b) => {
+    const da = parseDataBR(dataDesmontagemTorre(a)), dbb = parseDataBR(dataDesmontagemTorre(b));
+    return ((dbb ? dbb.getTime() : 0) - (da ? da.getTime() : 0)) || a.localeCompare(b);
+  });
+
+  const th = "padding:10px; color:white; font-size:12px; text-align:left;";
+  const caixa = t => edita ? `<td style="padding:9px 10px; width:34px;"><input type="checkbox" class="chk-desm" data-torre="${esc(t)}" ${selecionadasDesm.has(t) ? "checked" : ""} onchange="toggleTorreDesm('${t}', this.checked)"></td>` : "";
+  const cabecaCaixa = edita ? `<th style="${th} width:34px;"></th>` : "";
+  const vazio = (txt) => `<div class="empty-msg">${txt}</div>`;
+
+  // prontas
+  elProntas.innerHTML = prontas.length === 0 ? vazio("Nenhuma torre pronta para desmontar no momento.") : `<table style="width:100%; border-collapse:collapse; font-size:13px;">
+    <tr style="background:var(--blue-dark);">${cabecaCaixa}<th style="${th}">Torre</th><th style="${th}">Regional</th><th style="${th}">Clientes</th><th style="${th}">Situação</th></tr>
+    ${prontas.map((t, i) => { const r = resumoTorre(t); return `<tr style="background:${i % 2 === 0 ? "var(--grey-light)" : "white"};">${caixa(t)}<td style="padding:9px 10px; font-weight:600;">${esc(t)}</td><td style="padding:9px 10px;">${esc(r.regional)}</td><td style="padding:9px 10px;">${r.qtd}</td><td style="padding:9px 10px;"><span class="tag tag-green">Todos migrados</span></td></tr>`; }).join("")}
+  </table>`;
+
+  // outras (com aviso)
+  document.getElementById("desmOutrasTitulo").textContent = `Outras torres (${outras.length}) — ainda com clientes em andamento, pendentes ou cancelados`;
+  document.getElementById("desmOutras").innerHTML = outras.length === 0 ? vazio("Nenhuma.") : `<table style="width:100%; border-collapse:collapse; font-size:13px; margin-top:10px;">
+    <tr style="background:var(--blue-dark);">${cabecaCaixa}<th style="${th}">Torre</th><th style="${th}">Regional</th><th style="${th}">Clientes</th><th style="${th}">Situação</th></tr>
+    ${outras.map((t, i) => { const r = resumoTorre(t);
+      const marca = TORRES_MANTIDAS_ATIVAS.includes(t) ? ' <span class="tag tag-amber">Mantida ativa</span>' : (TORRES_PARTICULARES.includes(t) ? ' <span class="tag tag-amber">Particular</span>' : "");
+      return `<tr style="background:${i % 2 === 0 ? "var(--grey-light)" : "white"};">${caixa(t)}<td style="padding:9px 10px; font-weight:600;">${esc(t)}${marca}</td><td style="padding:9px 10px;">${esc(r.regional)}</td><td style="padding:9px 10px;">${r.qtd}</td><td style="padding:9px 10px; font-size:12px; color:var(--grey);">${textoSituacaoTorre(r.cont)}</td></tr>`; }).join("")}
+  </table>`;
+
+  // ja desmontadas
+  document.getElementById("desmFeitasTitulo").textContent = `Já desmontadas (${feitas.length})`;
+  document.getElementById("desmFeitas").innerHTML = feitas.length === 0 ? vazio("Nenhuma torre marcada como desmontada ainda.") : `<table style="width:100%; border-collapse:collapse; font-size:13px;">
+    <tr style="background:var(--blue-dark);"><th style="${th}">Torre</th><th style="${th}">Regional</th><th style="${th}">Desmontada em</th><th style="${th}">Marcada por</th>${edita ? `<th style="${th}"></th>` : ""}</tr>
+    ${feitas.map((t, i) => { const r = resumoTorre(t);
+      return `<tr style="background:${i % 2 === 0 ? "var(--grey-light)" : "white"};"><td style="padding:9px 10px; font-weight:600;">${esc(t)}</td><td style="padding:9px 10px;">${esc(r.regional)}</td><td style="padding:9px 10px;">${esc(dataDesmontagemTorre(t) || "—")}</td><td style="padding:9px 10px;">${esc(desmontadaPorTorre(t) || "—")}</td>${edita ? `<td style="padding:9px 10px; text-align:right;"><button class="btn-torre" onclick="desmarcarTorreDesmontada('${t}')">Desfazer</button></td>` : ""}</tr>`; }).join("")}
+  </table>`;
+  atualizarContadorDesm();
+}
+
+function marcarTorresSelecionadas() {
+  if (!exigirEdicao()) return;
+  const torres = [...selecionadasDesm].filter(t => !torreEstaDesmontada(t)).sort();
+  if (torres.length === 0) { window.alert("Marque pelo menos uma torre na lista."); return; }
+  const iso = document.getElementById("desmData").value;
+  if (!iso) { window.alert("Escolha a data da desmontagem."); return; }
+  const dataBR = formatarDataBR(iso);
+  const hoje = new Date(); hoje.setHours(23, 59, 59, 999);
+  const futura = new Date(iso + "T00:00:00") > hoje;
+  const avisos = [].concat(...torres.map(motivosDeAviso));
+  if (futura) avisos.push(`• A data escolhida (${dataBR}) ainda não chegou.`);
+  const texto = avisos.length
+    ? `Atenção:\n${avisos.join("\n")}\n\nMarcar ${torres.length} torre(s) como desmontada(s) em ${dataBR} mesmo assim?`
+    : `Marcar ${torres.length} torre(s) como desmontada(s) em ${dataBR}?\n\n${torres.join(", ")}`;
+  if (!window.confirm(texto)) return;
+  data.forEach(d => { if (torres.includes(d.torre)) { d.torreDesmontada = true; d.dataDesmontagem = dataBR; d.desmontadaPor = nomeUsuario(); } });
+  torres.forEach(t => registrarHistorico("Torre marcada como desmontada", `desmontada em ${dataBR}`, t, ""));
+  selecionadasDesm.clear();
   saveData();
   renderAll();
 }
@@ -610,6 +753,7 @@ let unsubUsuarios = null;         // lista de pedidos (so o administrador)
 let timerEmail = null;
 let cadastrando = false;
 let criandoPedido = false;
+let papelAtual = null;            // "administrador" | "usuario" | "leitor"
 let dadosCarregados = false;      // so deixa gravar depois de ler os dados de verdade (evita sobrescrever com lista vazia)
 let historicoCache = [];
 let usuariosCache = [];
@@ -624,7 +768,14 @@ function fmtDataHora(iso) {
   return isNaN(d) ? "" : d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 function nomeUsuario() { return usuario ? (usuario.nome || usuario.email) : "Sistema"; }
-function ehAdmin() { return !!usuario && usuario.email === ADMIN_EMAIL; }
+const PAPEIS = { administrador: "Administrador", usuario: "Usuário", leitor: "Leitor" };
+function ehAdmin() { return papelAtual === "administrador"; }
+function podeEditar() { return papelAtual === "administrador" || papelAtual === "usuario"; }
+function exigirEdicao() {
+  if (podeEditar()) return true;
+  window.alert("Seu acesso é somente de leitura. Peça ao administrador para mudar o seu perfil.");
+  return false;
+}
 function metaAlt(c) {
   return c.atualizadoPor
     ? `<div class="meta-alt">Última alteração: ${esc(c.atualizadoPor)}${c.atualizadoEm ? " · " + fmtDataHora(c.atualizadoEm) : ""}</div>`
@@ -744,7 +895,7 @@ async function tratarUsuario(user) {
   usuario = { nome: user.displayName || "", email: (user.email || "").toLowerCase(), uid: user.uid };
   if (!user.emailVerified) { mostrarVerificacao(); return; }   // 1) e-mail precisa estar confirmado
   if (!usuario.nome) { mostrarLogin("Nome"); return; }          // 2) precisa ter nome (contas criadas pelo console)
-  if (ehAdmin()) { liberarAcesso(); return; }                  // 3) administrador entra direto
+  if (usuario.email === ADMIN_EMAIL) { papelAtual = "administrador"; liberarAcesso(); return; }   // 3) administrador principal entra direto
   observarAcesso(user);                                        // 4) demais: so com o aprovado
 }
 
@@ -824,8 +975,11 @@ function observarAcesso(user) {
     }
     const st = snap.data().status;
     if (st === "aprovado") {
+      const p = snap.data().papel;
+      papelAtual = PAPEIS[p] ? p : "usuario";   // sem perfil definido = usuario
       liberarAcesso();
     } else {
+      papelAtual = null;
       desconectarDados();             // pendente ou recusado: nada de dados na tela
       document.getElementById("aguardandoMsg").textContent = "";
       mostrarLogin(st === "recusado" ? "Recusado" : "Aguardando");
@@ -843,8 +997,22 @@ function liberarAcesso() {
   esconderAviso();
   document.getElementById("userNome").textContent = nomeUsuario();
   document.getElementById("userBox").style.display = "block";
-  if (ehAdmin()) iniciarAdmin();
+  document.getElementById("userPapel").textContent = PAPEIS[papelAtual] || "";
+  if (ehAdmin()) iniciarAdmin(); else pararAdmin();
+  aplicarPapelNaTela();
   if (!firestoreListenerAtivo) { firestoreListenerAtivo = true; conectarFirestore(); }
+}
+
+// mostra/esconde o que cada perfil pode usar
+function aplicarPapelNaTela() {
+  document.body.classList.toggle("papel-leitor", papelAtual === "leitor");
+  const nl = document.getElementById("navLote");
+  if (nl) nl.style.display = podeEditar() ? "flex" : "none";
+  const nu = document.getElementById("navUsuarios");
+  if (nu) nu.style.display = ehAdmin() ? "flex" : "none";
+  const ativa = document.querySelector(".view.active");
+  if (ativa && ((ativa.id === "view-lote" && !podeEditar()) || (ativa.id === "view-usuarios" && !ehAdmin()))) switchViewByName("visao");
+  renderAll();
 }
 
 function desconectarDados() {
@@ -860,13 +1028,12 @@ function desconectarDados() {
 function limparSessao() {
   pararChecagemEmail();
   pararObservarAcesso();
-  if (unsubUsuarios) { try { unsubUsuarios(); } catch (e) {} unsubUsuarios = null; }
-  usuariosCache = [];
+  pararAdmin();
   historicoCache = [];
+  papelAtual = null;
   desconectarDados();
   usuario = null;
-  const nav = document.getElementById("navUsuarios");
-  if (nav) nav.style.display = "none";
+  document.body.classList.remove("papel-leitor");
   esconderAviso();
   mostrarLogin("Login");
 }
@@ -917,8 +1084,8 @@ async function loadData() {
 }
 
 async function saveData(showIndicator = true) {
-  if (!dadosCarregados || !usuario) {
-    console.warn("Gravação bloqueada: dados ainda não carregados ou usuário não identificado.");
+  if (!dadosCarregados || !usuario || !podeEditar()) {
+    console.warn("Gravação bloqueada: dados não carregados, usuário não identificado ou acesso só de leitura.");
     return;
   }
   try {
@@ -936,6 +1103,12 @@ async function saveData(showIndicator = true) {
 }
 
 // ---------- administrador: aprovar pedidos ----------
+function pararAdmin() {
+  if (unsubUsuarios) { try { unsubUsuarios(); } catch (e) {} unsubUsuarios = null; }
+  usuariosCache = [];
+  const nav = document.getElementById("navUsuarios");
+  if (nav) nav.style.display = "none";
+}
 function iniciarAdmin() {
   const nav = document.getElementById("navUsuarios");
   if (nav) nav.style.display = "flex";
@@ -948,6 +1121,10 @@ function iniciarAdmin() {
     console.error("Erro ao ler usuários:", err);
     document.getElementById("usuariosAviso").innerHTML = '<span style="color:var(--red-text); font-weight:700;">Não foi possível carregar os pedidos (' + esc(err.code || "erro") + ').</span>';
   });
+}
+
+function opcoesPapel(sel) {
+  return Object.entries(PAPEIS).map(([k, v]) => `<option value="${k}" ${k === sel ? "selected" : ""}>${v}</option>`).join("");
 }
 
 function renderUsuarios() {
@@ -963,19 +1140,21 @@ function renderUsuarios() {
     return;
   }
   const th = "padding:10px; color:white; font-size:12px; text-align:left;";
-  let html = `<tr style="background:var(--blue-dark);"><th style="${th}">Nome</th><th style="${th}">E-mail</th><th style="${th}">Situação</th><th style="${th}">Pedido em</th><th style="${th}">Ações</th></tr>`;
+  let html = `<tr style="background:var(--blue-dark);"><th style="${th}">Nome</th><th style="${th}">E-mail</th><th style="${th}">Situação</th><th style="${th}">Pedido em</th><th style="${th}">Perfil e ações</th></tr>`;
   lista.forEach((u, i) => {
     const bg = i % 2 === 0 ? "var(--grey-light)" : "white";
-    const tag = u.status === "aprovado" ? '<span class="tag tag-green">Aprovado</span>'
+    const papelU = PAPEIS[u.papel] ? u.papel : "usuario";
+    const tag = u.status === "aprovado" ? `<span class="tag tag-green">Aprovado · ${PAPEIS[papelU]}</span>`
               : u.status === "recusado" ? '<span class="tag tag-red">Sem acesso</span>'
               : '<span class="tag tag-amber">Aguardando</span>';
     const decidido = u.decididoPor ? `<div class="meta-alt">por ${esc(u.decididoPor)}${u.decididoEm ? " · " + fmtDataHora(u.decididoEm) : ""}</div>` : "";
     const id = esc(u.uid);
+    const selPapel = `<select class="sel-papel" id="papel-${id}" ${u.status === "aprovado" ? `onchange="mudarPapel('${id}', this.value)"` : ""}>${opcoesPapel(papelU)}</select>`;
     const acoes = u.status === "pendente"
-      ? `<button class="btn-torre" onclick="decidirAcesso('${id}','aprovado')">Aprovar</button> <button class="btn-torre" onclick="decidirAcesso('${id}','recusado')">Recusar</button>`
+      ? `${selPapel} <button class="btn-torre" onclick="decidirAcesso('${id}','aprovado')">Aprovar</button> <button class="btn-torre" onclick="decidirAcesso('${id}','recusado')">Recusar</button>`
       : u.status === "aprovado"
-        ? `<button class="btn-torre" onclick="decidirAcesso('${id}','recusado')">Remover acesso</button>`
-        : `<button class="btn-torre" onclick="decidirAcesso('${id}','aprovado')">Aprovar</button>`;
+        ? `${selPapel} <button class="btn-torre" onclick="decidirAcesso('${id}','recusado')">Remover acesso</button>`
+        : `${selPapel} <button class="btn-torre" onclick="decidirAcesso('${id}','aprovado')">Aprovar</button>`;
     html += `<tr style="background:${bg};">
       <td style="padding:9px 10px; font-weight:600;">${esc(u.nome)}</td>
       <td style="padding:9px 10px;">${esc(u.email)}</td>
@@ -991,23 +1170,45 @@ async function decidirAcesso(uid, status) {
   if (!ehAdmin()) return;
   const u = usuariosCache.find(x => x.uid === uid);
   if (!u) return;
+  const campo = document.getElementById("papel-" + uid);
+  const papel = (campo && PAPEIS[campo.value]) ? campo.value : "usuario";
+  const rotulo = PAPEIS[papel];
   const acao = status === "aprovado" ? "Acesso aprovado" : (u.status === "aprovado" ? "Acesso removido" : "Acesso recusado");
   const pergunta = status === "aprovado"
-    ? `Liberar o acesso de ${u.nome} (${u.email})?`
+    ? `Liberar o acesso de ${u.nome} (${u.email}) como ${rotulo}?`
     : (u.status === "aprovado" ? `Remover o acesso de ${u.nome} (${u.email})?` : `Recusar o pedido de ${u.nome} (${u.email})?`);
   if (!window.confirm(pergunta)) return;
+  const dados = { status: status, decididoPor: usuario.email, decididoEm: new Date().toISOString() };
+  if (status === "aprovado") dados.papel = papel;
   try {
-    await db.collection("usuarios").doc(uid).update({ status: status, decididoPor: usuario.email, decididoEm: new Date().toISOString() });
-    registrarHistorico(acao, `${u.nome} (${u.email})`);
+    await db.collection("usuarios").doc(uid).update(dados);
+    registrarHistorico(acao, status === "aprovado" ? `${u.nome} (${u.email}) como ${rotulo}` : `${u.nome} (${u.email})`);
   } catch (e) {
     console.error(e);
     window.alert("Não foi possível alterar o acesso (" + (e.code || "erro") + ").");
   }
 }
 
+async function mudarPapel(uid, novo) {
+  if (!ehAdmin()) return;
+  const u = usuariosCache.find(x => x.uid === uid);
+  if (!u || !PAPEIS[novo]) return;
+  const antes = PAPEIS[u.papel] ? u.papel : "usuario";
+  if (antes === novo) return;
+  if (!window.confirm(`Mudar o perfil de ${u.nome} (${u.email}) de ${PAPEIS[antes]} para ${PAPEIS[novo]}?`)) { renderUsuarios(); return; }
+  try {
+    await db.collection("usuarios").doc(uid).update({ papel: novo, decididoPor: usuario.email, decididoEm: new Date().toISOString() });
+    registrarHistorico("Perfil alterado", `${u.nome} (${u.email}): ${PAPEIS[antes]} → ${PAPEIS[novo]}`);
+  } catch (e) {
+    console.error(e);
+    window.alert("Não foi possível mudar o perfil (" + (e.code || "erro") + ").");
+    renderUsuarios();
+  }
+}
+
 // ---- Historico: uma linha por acao, gravada numa colecao propria (so acrescenta) ----
 function registrarHistorico(acao, detalhe, torre, cliente) {
-  if (!usuario) return;
+  if (!usuario || !podeEditar()) return;
   const registro = {
     quando: new Date().toISOString(),
     quandoServidor: firebase.firestore.FieldValue.serverTimestamp(),
@@ -1067,6 +1268,7 @@ function renderHistorico() {
 function updateClient(id, field, value) {
   const item = data.find(d => d.id === id);
   if (!item) return;
+  if (!exigirEdicao()) { renderAll(); return; }
   const antes = item[field] === undefined || item[field] === null ? "" : item[field];
   if (antes === value) return;   // nada mudou (ex.: clicou na caixa e saiu sem editar)
   item[field] = value;
@@ -1083,6 +1285,7 @@ function normalizar(txt) {
 }
 
 async function aplicarLote() {
+  if (!exigirEdicao()) return;
   const resultadoEl = document.getElementById("loteResultado");
   const input = document.getElementById("loteInput").value;
   let updates;
@@ -1154,7 +1357,7 @@ function switchView(viewName, el) {
   el.classList.add("active");
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   document.getElementById("view-" + viewName).classList.add("active");
-  const titles = { visao: "Migração de Torres", regionais: "Regionais e torres", cartas: "Cartas de distrato", finalizados: "Clientes finalizados", lote: "Atualizar em lote", resumo: "Resumo executivo", historico: "Histórico de alterações", usuarios: "Usuários e acessos" };
+  const titles = { visao: "Migração de Torres", regionais: "Regionais e torres", cartas: "Cartas de distrato", finalizados: "Clientes finalizados", lote: "Atualizar em lote", resumo: "Resumo executivo", historico: "Histórico de alterações", usuarios: "Usuários e acessos", desmontagem: "Desmontagem de torres" };
   document.getElementById("viewTitle").textContent = titles[viewName];
   if (viewName === "historico") carregarHistorico();
 }
@@ -1171,6 +1374,7 @@ function renderAll() {
   renderContent();
   renderCartasList();
   renderFinalizadosList();
+  renderDesmontagem();
   renderResumo();
 }
 
@@ -1237,6 +1441,7 @@ function populateFilters() {
 }
 
 function renderContent() {
+  const edita = podeEditar();
   const search = document.getElementById("searchInput").value.toLowerCase();
   const regionalF = document.getElementById("regionalFilter").value;
   const statusF = document.getElementById("statusFilter").value;
@@ -1282,13 +1487,13 @@ function renderContent() {
           : "";
         html += `<div class="client-row">
           <div class="name">${c.cliente}${cartaInfo}${metaAlt(c)}</div>
-          <select class="${statusClass(c.status)}" onchange="updateClient(${c.id}, 'status', this.value)">
+          <select class="${statusClass(c.status)}" ${edita ? "" : "disabled"} onchange="updateClient(${c.id}, 'status', this.value)">
             <option value="Pendente" ${c.status === "Pendente" ? "selected" : ""}>Pendente</option>
             <option value="Em andamento" ${c.status === "Em andamento" ? "selected" : ""}>Em andamento</option>
             <option value="Concluído" ${c.status === "Concluído" ? "selected" : ""}>Concluído</option>
             <option value="Cancelado (sem alternativa)" ${c.status === "Cancelado (sem alternativa)" ? "selected" : ""}>Cancelado (sem alternativa)</option>
           </select>
-          <textarea placeholder="Observação..." onblur="updateClient(${c.id}, 'obs', this.value)">${c.obs || ""}</textarea>
+          <textarea placeholder="Observação..." ${edita ? "" : "readonly"} onblur="updateClient(${c.id}, 'obs', this.value)">${c.obs || ""}</textarea>
         </div>`;
       });
       html += `</div>`;
@@ -1314,7 +1519,7 @@ function renderCartasList() {
           ? `<span class="tag tag-green">Enviada em ${c.dataEnvioCarta}</span>`
           : `<span class="tag tag-red">Sem alternativa</span>`}
       </div>
-      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+      <div class="acoes-edicao" style="display:flex; gap:6px; flex-wrap:wrap;">
         <button class="btn-small" onclick="openCartaModal(${c.id})">Gerar carta</button>
         ${c.cartaEnviada
           ? `<button class="btn-small" onclick="desmarcarCartaEnviada(${c.id})">Desmarcar</button>`
@@ -1325,6 +1530,7 @@ function renderCartasList() {
 }
 
 function marcarCartaEnviada(id) {
+  if (!exigirEdicao()) return;
   const item = data.find(d => d.id === id);
   if (!item) return;
   const hoje = new Date().toLocaleDateString("pt-BR");
@@ -1341,6 +1547,7 @@ function marcarCartaEnviada(id) {
 }
 
 function desmarcarCartaEnviada(id) {
+  if (!exigirEdicao()) return;
   const item = data.find(d => d.id === id);
   if (!item) return;
   if (!window.confirm("Desmarcar essa carta como enviada?")) return;
@@ -1818,6 +2025,7 @@ function abrirConsultaPdf() {
 function formatarDataBR(iso) { const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; }
 
 function openCartaModal(id) {
+  if (!exigirEdicao()) return;
   const item = data.find(d => d.id === id);
   if (!item) return;
   cartaClienteAtual = item;
