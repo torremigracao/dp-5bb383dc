@@ -166,6 +166,13 @@
   .sel-papel { font-size: 11px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; margin-right: 4px; }
   details.list-card > summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--blue-dark); }
   body.papel-leitor .btn-torre, body.papel-leitor .btn-carta, body.papel-leitor .acao-col, body.papel-leitor .acoes-edicao { display: none !important; }
+  .torres-cidade { margin-bottom: 18px; }
+  .torres-cidade-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; border-bottom: 2px solid var(--teal); padding-bottom: 6px; margin-bottom: 10px; font-weight: 700; color: var(--blue-dark); font-size: 15px; }
+  .torres-cidade-head span:last-child { font-size: 12px; color: var(--grey); font-weight: 700; }
+  .torres-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+  .torres-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: var(--grey-light); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  .torres-nome { font-weight: 700; color: #14162B; }
+  .torres-qtd { background: white; border: 1px solid var(--border); border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 700; color: var(--blue-dark); }
   .client-row { display: grid; grid-template-columns: minmax(160px, 1.4fr) 150px 2fr; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--border); align-items: start; }
   .client-row .name { font-size: 12px; padding-top: 8px; font-weight: 500; }
   .client-row select { width: 100%; padding: 6px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; border: 1px solid var(--border); cursor: pointer; }
@@ -295,6 +302,7 @@
 
     <div class="nav-item active" data-view="visao" onclick="switchView('visao', this)"><span class="dot"></span> Visão geral</div>
     <div class="nav-item" data-view="regionais" onclick="switchView('regionais', this)"><span class="dot"></span> Regionais e torres</div>
+    <div class="nav-item" data-view="torres" onclick="switchView('torres', this)"><span class="dot"></span> Torres por cidade</div>
     <div class="nav-item" data-view="cartas" onclick="switchView('cartas', this)"><span class="dot"></span> Cartas de distrato<span class="badge" id="badgeCartas">0</span></div>
     <div class="nav-item" data-view="finalizados" onclick="switchView('finalizados', this)"><span class="dot"></span> Finalizados</div>
     <div class="nav-item" data-view="desmontagem" onclick="switchView('desmontagem', this)"><span class="dot"></span> Desmontagem</div>
@@ -408,6 +416,21 @@ Para ADICIONAR um cliente/torre novo, inclua também "regional":
           <button class="btn-ghost" onclick="document.getElementById('loteInput').value=''; document.getElementById('loteResultado').innerHTML='';">Limpar</button>
         </div>
         <div id="loteResultado" style="margin-top:14px; font-size:13px;"></div>
+      </div>
+    </div>
+
+    <div class="view" id="view-torres">
+      <h2 class="section-title">Torres por cidade</h2>
+      <p class="section-sub">Escolha a cidade para ver o nome de todas as torres dela e quantos clientes cada uma tem.</p>
+      <div class="list-card">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px;">
+          <select id="torresCidade" onchange="renderTorres()" style="padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px; min-width:200px;"></select>
+          <input type="text" id="torresBusca" placeholder="Buscar torre..." oninput="renderTorres()" style="flex:1; min-width:160px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+          <span id="torresResumo" style="font-size:13px; color:var(--grey); font-weight:700;"></span>
+          <button class="btn-ghost" onclick="copiarTorres(this)">Copiar lista</button>
+          <button class="btn-primary" onclick="abrirTorresPdf()">Gerar PDF</button>
+        </div>
+        <div id="torresLista"></div>
       </div>
     </div>
 
@@ -739,6 +762,86 @@ function marcarTorresSelecionadas() {
   selecionadasDesm.clear();
   saveData();
   renderAll();
+}
+
+// ===== Aba "Torres por cidade" =====
+function torresPorCidade() {
+  const r = {};
+  data.forEach(d => { r[d.regional] = r[d.regional] || {}; r[d.regional][d.torre] = (r[d.regional][d.torre] || 0) + 1; });
+  return r;
+}
+function torresDaTela() {   // [{cidade, torres:[[nome, qtd]...]}] conforme cidade e busca escolhidas
+  const mapa = torresPorCidade();
+  const sel = document.getElementById("torresCidade");
+  const busca = (document.getElementById("torresBusca").value || "").toLowerCase();
+  const cidades = Object.keys(mapa).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  return (sel.value ? [sel.value] : cidades).map(c => ({
+    cidade: c,
+    torres: Object.entries(mapa[c] || {}).filter(([t]) => !busca || t.toLowerCase().includes(busca)).sort(([a], [b]) => a.localeCompare(b)),
+  })).filter(x => x.torres.length > 0);
+}
+function renderTorres() {
+  const sel = document.getElementById("torresCidade");
+  if (!sel) return;
+  const cidades = Object.keys(torresPorCidade()).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const atual = sel.value;
+  sel.innerHTML = '<option value="">Todas as cidades</option>' + cidades.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  sel.value = cidades.includes(atual) ? atual : "";
+  const grupos = torresDaTela();
+  let totT = 0, totC = 0, html = "";
+  grupos.forEach(g => {
+    const cli = g.torres.reduce((s, [, n]) => s + n, 0);
+    totT += g.torres.length; totC += cli;
+    html += `<div class="torres-cidade"><div class="torres-cidade-head"><span>${esc(g.cidade)}</span><span>${g.torres.length} torre(s) · ${cli} cliente(s)</span></div>
+      <div class="torres-grid">${g.torres.map(([t, n]) => `<div class="torres-item"><span class="torres-nome">${esc(t)}${torreEstaDesmontada(t) ? ' <span class="badge-desmontada">desmontada</span>' : ""}</span><span class="torres-qtd">${n}</span></div>`).join("")}</div></div>`;
+  });
+  document.getElementById("torresLista").innerHTML = html || '<div class="empty-msg">Nenhuma torre encontrada.</div>';
+  document.getElementById("torresResumo").textContent = `${totT} torre(s) · ${totC} cliente(s)`;
+}
+function textoTorres() {
+  return torresDaTela().map(g => `${g.cidade} (${g.torres.length} torres, ${g.torres.reduce((s, [, n]) => s + n, 0)} clientes)\n` + g.torres.map(([t, n]) => `${t} - ${n}`).join("\n")).join("\n\n");
+}
+async function copiarTorres(btn) {
+  const texto = textoTorres();
+  try { await navigator.clipboard.writeText(texto); }
+  catch (e) { const ta = document.createElement("textarea"); ta.value = texto; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } catch (e2) {} ta.remove(); }
+  if (btn) { const antes = btn.textContent; btn.textContent = "Copiado!"; setTimeout(() => { btn.textContent = antes; }, 1500); }
+}
+function abrirTorresPdf() {
+  document.getElementById("pdfModalTitle").innerHTML = "<strong>Torres por cidade</strong>";
+  document.getElementById("periodoSeletor").style.display = "none";
+  const grupos = torresDaTela();
+  const cidadeSel = document.getElementById("torresCidade").value;
+  const busca = document.getElementById("torresBusca").value;
+  const filtros = [cidadeSel ? `Cidade: ${cidadeSel}` : "Todas as cidades"].concat(busca ? [`Busca: "${busca}"`] : []);
+  const th = 'padding:7px 8px; color:white; font-size:11px; text-align:left;';
+  let corpo = "", totT = 0, totC = 0;
+  grupos.forEach(g => {
+    const cli = g.torres.reduce((s, [, n]) => s + n, 0);
+    totT += g.torres.length; totC += cli;
+    const meio = Math.ceil(g.torres.length / 2);
+    let linhas = "";
+    for (let i = 0; i < meio; i++) {
+      const a = g.torres[i], b = g.torres[i + meio];
+      const bg = i % 2 === 1 ? "background:#EEF2FF;" : "";
+      linhas += `<tr style="${bg}"><td style="padding:5px 8px; font-weight:700;">${esc(a[0])}</td><td style="padding:5px 8px; text-align:center;">${a[1]}</td>` +
+        (b ? `<td style="padding:5px 8px; font-weight:700;">${esc(b[0])}</td><td style="padding:5px 8px; text-align:center;">${b[1]}</td>` : "<td></td><td></td>") + "</tr>";
+    }
+    corpo += `<h3 style="margin:16px 0 6px 0; color:var(--blue-dark); font-size:15px;">${esc(g.cidade)} <span style="font-size:11px; color:var(--grey); font-weight:700;">&nbsp;${g.torres.length} torre(s) · ${cli} cliente(s)</span></h3>
+      <table style="width:100%; border-collapse:collapse; font-size:12px; page-break-inside:auto;">
+        <tr style="background:var(--blue-dark);"><th style="${th}">Torre</th><th style="${th} text-align:center;">Clientes</th><th style="${th}">Torre</th><th style="${th} text-align:center;">Clientes</th></tr>${linhas}</table>`;
+  });
+  const total = grupos.length > 1 ? `<p style="margin-top:14px; font-size:13px;"><strong>Total: ${totT} torres · ${totC} clientes</strong></p>` : "";
+  const logo = document.querySelector("#loginOverlay img").src;
+  document.getElementById("resumoPdfContent").innerHTML = `
+    <img class="logo" src="${logo}" alt="UNI Internet">
+    <hr class="divider">
+    <h2 style="margin-bottom:2px;">Torres por cidade</h2>
+    <p style="font-style:italic; color:var(--grey); margin-top:0; margin-bottom:4px;">Gerado em ${new Date().toLocaleDateString("pt-BR")} por ${esc(nomeUsuario())}</p>
+    <p style="font-size:12px; color:var(--grey); margin-top:0; margin-bottom:6px;">${filtros.join(" &nbsp;·&nbsp; ")}</p>
+    ${corpo || '<div class="empty-msg">Nenhuma torre encontrada.</div>'}${total}
+    <div class="footer-note">UNI Internet, unindo pessoas, fortalecendo conexões. · Central de Atendimento: 2201-0300</div>`;
+  document.getElementById("resumoPdfModal").classList.add("show");
 }
 
 function statusClass(status) { return "status-" + status.split(" ")[0].replace("í", "i"); }
@@ -1358,7 +1461,7 @@ function switchView(viewName, el) {
   el.classList.add("active");
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   document.getElementById("view-" + viewName).classList.add("active");
-  const titles = { visao: "Migração de Torres", regionais: "Regionais e torres", cartas: "Cartas de distrato", finalizados: "Clientes finalizados", lote: "Atualizar em lote", resumo: "Resumo executivo", historico: "Histórico de alterações", usuarios: "Usuários e acessos", desmontagem: "Desmontagem de torres" };
+  const titles = { visao: "Migração de Torres", regionais: "Regionais e torres", cartas: "Cartas de distrato", finalizados: "Clientes finalizados", lote: "Atualizar em lote", resumo: "Resumo executivo", historico: "Histórico de alterações", usuarios: "Usuários e acessos", desmontagem: "Desmontagem de torres", torres: "Torres por cidade" };
   document.getElementById("viewTitle").textContent = titles[viewName];
   if (viewName === "historico") carregarHistorico();
 }
@@ -1376,6 +1479,7 @@ function renderAll() {
   renderCartasList();
   renderFinalizadosList();
   renderDesmontagem();
+  renderTorres();
   renderResumo();
 }
 
