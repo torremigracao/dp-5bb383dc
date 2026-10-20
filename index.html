@@ -1469,6 +1469,7 @@ async function aplicarLote() {
 
   let atualizados = 0;
   let criados = 0;
+  let regionalCorrigida = 0;
   let semRegional = [];
   const torresLote = new Set();
   let proximoId = data.length > 0 ? Math.max(...data.map(d => d.id)) + 1 : 1;
@@ -1481,6 +1482,7 @@ async function aplicarLote() {
     if (item) {
       if (u.status) item.status = u.status;
       if (u.obs !== undefined) item.obs = u.obs;
+      if (u.regional && u.regional !== item.regional) { item.regional = u.regional; regionalCorrigida++; }
       item.atualizadoEm = new Date().toISOString();
       item.atualizadoPor = nomeUsuario();
       torresLote.add(item.torre);
@@ -1507,12 +1509,13 @@ async function aplicarLote() {
 
   if (atualizados > 0 || criados > 0) {
     await saveData(true);
-    registrarHistorico("Atualização em lote", `${atualizados} atualizado(s), ${criados} novo(s) — torres: ${[...torresLote].join(", ")}`.slice(0, 300));
+    registrarHistorico("Atualização em lote", `${atualizados} atualizado(s)${regionalCorrigida ? ` (${regionalCorrigida} com regional corrigida)` : ""}, ${criados} novo(s) — torres: ${[...torresLote].join(", ")}`.slice(0, 300));
     renderAll();
   }
 
   let msg = "";
   if (atualizados > 0) msg += `<span style="color:var(--green-text); font-weight:700;">${atualizados} cliente(s) atualizado(s).</span><br>`;
+  if (regionalCorrigida > 0) msg += `<span style="color:var(--blue-dark); font-weight:700;">${regionalCorrigida} regional(is) corrigida(s).</span><br>`;
   if (criados > 0) msg += `<span style="color:var(--blue-dark); font-weight:700;">${criados} cliente(s)/torre(s) novo(s) adicionado(s).</span><br>`;
   if (semRegional.length > 0) {
     msg += `<span style="color:var(--red-text);">Não foi possível criar (falta "regional", "torre" ou "cliente"): ${semRegional.join(", ")}</span>`;
