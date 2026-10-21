@@ -209,10 +209,14 @@
   .carta-content .assinatura .linha { border-top: 1px solid #9AA5B8; width: 220px; margin: 0 auto 8px; }
   .carta-content .footer-note { font-size: 11px; color: var(--grey); text-align: center; margin-top: 24px; border-top: 1px solid var(--border); padding-top: 10px; }
 
+  /* margem da pagina zerada: some com o cabecalho e o rodape que o navegador imprime (data, hora, titulo, endereco); o espaco das bordas vem do proprio conteudo, repetido em cada pagina */
+  @page { size: A4; margin: 0; }
   @media print {
+    html, body { background: #fff !important; }
+    .app, .login-overlay { display: none !important; }
     body * { visibility: hidden; }
     .carta-content, .carta-content * { visibility: visible; }
-    .carta-content { position: absolute; top: 0; left: 0; width: 100%; padding: 20px; }
+    .carta-content { position: absolute; top: 0; left: 0; width: 100%; box-sizing: border-box; padding: 16mm 18mm; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
     .modal-toolbar, .sidebar { display: none; }
     .modal-overlay { position: absolute; background: none; }
     .modal-box { max-height: none; overflow: visible; box-shadow: none; }
