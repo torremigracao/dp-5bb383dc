@@ -650,11 +650,11 @@ function desmontadaPorTorre(torre) {
   const r = data.find(d => d.torre === torre && d.torreDesmontada);
   return r ? (r.desmontadaPor || "") : "";
 }
-// "Pronta p/ desmontar" = todos os clientes encerrados (migrados ou cancelados de fato), nao e mantida ativa nem particular e ainda nao foi desmontada
+// "Pronta p/ desmontar" = todos os clientes encerrados (migrados, ou cancelados de fato com a carta enviada), nao e mantida ativa nem particular e ainda nao foi desmontada
 function torreProntaParaDesmontar(torre) {
   const regs = data.filter(d => d.torre === torre);
   return regs.length > 0
-    && regs.every(d => statusResolvido(d.status))
+    && regs.every(clienteEncerrado)
     && !TORRES_MANTIDAS_ATIVAS.includes(torre)
     && !TORRES_PARTICULARES.includes(torre)
     && !torreEstaDesmontada(torre);
@@ -662,7 +662,7 @@ function torreProntaParaDesmontar(torre) {
 // torre com todos os clientes concluidos; "resolvida mantida" = concluida e que continua ativa (nao sera desmontada)
 function torreConcluida(torre) {
   const regs = data.filter(d => d.torre === torre);
-  return regs.length > 0 && regs.every(d => statusResolvido(d.status));
+  return regs.length > 0 && regs.every(clienteEncerrado);
 }
 function torreResolvidaMantida(torre) {
   return TORRES_MANTIDAS_ATIVAS.includes(torre) && torreConcluida(torre) && !torreEstaDesmontada(torre);
@@ -705,12 +705,12 @@ function dataHojeISO() {
 function resumoTorre(torre) {
   const regs = data.filter(d => d.torre === torre);
   const cont = {};
-  regs.forEach(d => { cont[d.status] = (cont[d.status] || 0) + 1; });
+  regs.forEach(d => { cont[d.status] = (cont[d.status] || 0) + 1; if (d.status === ST_CANC && !d.cartaEnviada) cont["__semCarta"] = (cont["__semCarta"] || 0) + 1; });
   return { qtd: regs.length, cont: cont, regional: regs.length ? regs[0].regional : "" };
 }
 function textoSituacaoTorre(cont) {
   const nomes = { "Concluído": "concluído(s)", "Em andamento": "em andamento", "Pendente": "pendente(s)", "Cancelado (sem alternativa)": "serão cancelado(s)", "Cancelado": "cancelado(s)" };
-  return Object.keys(nomes).filter(k => cont[k]).map(k => `${cont[k]} ${nomes[k]}`).join(" · ") || "—";
+  return Object.keys(nomes).filter(k => cont[k]).map(k => `${cont[k]} ${nomes[k]}${k === "Cancelado" && cont["__semCarta"] ? ` (${cont["__semCarta"]} sem carta enviada)` : ""}`).join(" · ") || "—";
 }
 // motivos para pedir confirmacao antes de marcar uma torre como desmontada
 function motivosDeAviso(torre) {
@@ -720,6 +720,9 @@ function motivosDeAviso(torre) {
   if (TORRES_PARTICULARES.includes(torre)) m.push(`• ${torre}: é uma torre particular (de terceiros), ainda em tratativa.`);
   const pend = cont["Pendente"] || 0, and = cont["Em andamento"] || 0;
   if (pend || and) m.push(`• ${torre}: ainda tem ${[pend ? pend + " cliente(s) pendente(s)" : "", and ? and + " em andamento" : ""].filter(Boolean).join(" e ")}.`);
+  const sera = cont[ST_SERA] || 0, semCarta = cont["__semCarta"] || 0;
+  if (sera) m.push(`• ${torre}: ainda tem ${sera} cliente(s) a cancelar (contato e carta pendentes).`);
+  if (semCarta) m.push(`• ${torre}: ${semCarta} cliente(s) marcado(s) como Cancelado, mas sem a carta enviada.`);
   return m;
 }
 function toggleTorreDesm(torre, marcado) {
@@ -927,7 +930,9 @@ const ST_SERA = "Cancelado (sem alternativa)";
 const ST_CANC = "Cancelado";
 function rotuloStatus(s) { return s === ST_SERA ? "Cliente será cancelado" : s; }
 function ehCancelamento(s) { return s === ST_SERA || s === ST_CANC; }
-function statusResolvido(s) { return s === "Concluído" || s === ST_CANC; }   // caso encerrado: migrado ou cancelado de fato
+// cliente encerrado = migrado (Concluído) ou cancelado de fato COM a carta já enviada ("Cancelado" pressupõe contato feito e carta enviada)
+function clienteEncerrado(d) { return d.status === "Concluído" || (d.status === ST_CANC && !!d.cartaEnviada); }
+function torreEncerrada(torre) { const regs = data.filter(d => d.torre === torre); return regs.length > 0 && regs.every(clienteEncerrado); }
 function normalizarStatus(s) {
   const t = String(s || "").trim().toLowerCase();
   if (["será cancelado", "sera cancelado", "cliente será cancelado", "cliente sera cancelado", "a cancelar"].includes(t)) return ST_SERA;
@@ -1465,7 +1470,7 @@ function updateClient(id, field, value) {
   const antes = item[field] === undefined || item[field] === null ? "" : item[field];
   if (antes === value) return;   // nada mudou (ex.: clicou na caixa e saiu sem editar)
   if (field === "status" && value === ST_CANC && !item.cartaEnviada &&
-      !confirm("A carta de cancelamento deste cliente ainda não foi marcada como enviada.\n\nMarcar como Cancelado mesmo assim?")) { renderAll(); return; }
+      !confirm("A carta de cancelamento deste cliente ainda não foi marcada como enviada.\n\nMarcar como Cancelado mesmo assim?\n\n(A torre só fica pronta para desmontar depois que a carta for marcada como enviada.)")) { renderAll(); return; }
   item[field] = value;
   item.atualizadoEm = new Date().toISOString();
   item.atualizadoPor = nomeUsuario();
@@ -1805,7 +1810,7 @@ function renderResumo() {
       listaMantidas.push(torre);
     } else if (TORRES_PARTICULARES.includes(torre)) {
       listaParticulares.push(torre);
-    } else if (sts.every(s => statusResolvido(s))) {
+    } else if (torreEncerrada(torre)) {
       listaProntas.push(torre);
     } else if (sts.every(s => s === ST_SERA)) {
       listaCanceladas.push(torre);
@@ -2110,7 +2115,7 @@ function renderConsulta() {
       if (torreEstaDesmontada(torre)) catDesmontadas.push(`${torre} (${dataDesmontagemTorre(torre) || "sem data"})`);
       else if (TORRES_MANTIDAS_ATIVAS.includes(torre)) (sts.every(s => s === "Concluído") ? catConcluidasAtivas : catMantidas).push(torre);
       else if (TORRES_PARTICULARES.includes(torre)) catParticulares.push(torre);
-      else if (sts.every(s => statusResolvido(s))) catProntas.push(torre);
+      else if (torreEncerrada(torre)) catProntas.push(torre);
       else if (sts.every(s => s === ST_SERA)) catCanceladasTorre.push(torre);
       else if (sts.every(s => s === "Pendente")) catPendentesTorre.push(torre);
       else catMistas.push(torre);
@@ -2306,7 +2311,7 @@ function abrirResumoPdf() {
   Object.entries(torresMap).forEach(([torre, sts]) => {
     if (TORRES_MANTIDAS_ATIVAS.includes(torre)) listaMantidas.push(torre);
     else if (TORRES_PARTICULARES.includes(torre)) listaParticulares.push(torre);
-    else if (sts.every(s => statusResolvido(s))) listaProntas.push(torre);
+    else if (torreEncerrada(torre)) listaProntas.push(torre);
     else if (sts.every(s => s === ST_SERA)) listaCanceladas.push(torre);
     else if (sts.every(s => s === "Pendente")) listaPendentes.push(torre);
   });
