@@ -403,6 +403,7 @@
     <div class="view" id="view-cartas">
       <h2 class="section-title">Cartas de distrato</h2>
       <p class="section-sub">Clientes que serão cancelados (e os já cancelados) — gere e envie a carta de encerramento. Depois do contato e da carta enviada, mude o status para Cancelado.</p>
+      <div id="cartasResumo"></div>
       <div class="list-card"><div id="cartasList"></div></div>
     </div>
 
@@ -1711,9 +1712,83 @@ function renderContent() {
   content.innerHTML = html;
 }
 
+// ===== Prazo de 30 dias depois da carta enviada =====
+const PRAZO_CARTA_DIAS = 30;
+function prazoCarta(c) {   // a partir da data em que a carta foi marcada como enviada
+  if (!c.cartaEnviada) return null;
+  const env = parseDataBR(c.dataEnvioCarta);
+  if (!env) return { semData: true, vencido: false, dias: null, vence: "", venceData: null };
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const dias = Math.round((hoje - env) / 86400000);
+  const venceData = new Date(env); venceData.setDate(venceData.getDate() + PRAZO_CARTA_DIAS);
+  return { semData: false, vencido: dias >= PRAZO_CARTA_DIAS, dias: dias, vence: venceData.toLocaleDateString("pt-BR"), venceData: venceData };
+}
+function renderCartasResumo(cancelados) {
+  const el = document.getElementById("cartasResumo");
+  if (!el) return;
+  if (cancelados.length === 0) { el.innerHTML = ""; return; }
+  const aEnviar = cancelados.filter(c => !c.cartaEnviada);
+  const enviadasSera = cancelados.filter(c => c.cartaEnviada && c.status === ST_SERA);
+  const vencidas = enviadasSera.filter(c => prazoCarta(c).vencido).sort((a, b) => prazoCarta(b).dias - prazoCarta(a).dias);
+  const noPrazo = enviadasSera.filter(c => { const p = prazoCarta(c); return !p.vencido && !p.semData; });
+  const semData = enviadasSera.filter(c => prazoCarta(c).semData);
+  const jaCancelados = cancelados.filter(c => c.status === ST_CANC);
+  // proximo prazo a vencer
+  let proximo = "";
+  if (noPrazo.length) {
+    const menor = Math.min(...noPrazo.map(c => prazoCarta(c).venceData.getTime()));
+    const dessa = noPrazo.filter(c => prazoCarta(c).venceData.getTime() === menor);
+    proximo = `Próximo prazo a vencer: <strong>${new Date(menor).toLocaleDateString("pt-BR")}</strong> (${dessa.length} cliente(s)).`;
+  }
+  const th = "padding:7px 10px; color:white; font-size:11px; text-align:left;";
+  let html = `<div class="card-grid" style="margin-bottom:14px;">
+    <div class="metric-card c-red"><div class="label">Cartas a enviar</div><div class="num">${aEnviar.length}</div></div>
+    <div class="metric-card c-teal"><div class="label">Enviadas, no prazo</div><div class="num">${noPrazo.length}</div></div>
+    <div class="metric-card c-amber"><div class="label">30 dias vencidos</div><div class="num">${vencidas.length}</div></div>
+    <div class="metric-card c-dark"><div class="label">Já cancelados</div><div class="num">${jaCancelados.length}</div></div>
+  </div>`;
+  const notas = [];
+  if (proximo) notas.push(proximo);
+  if (semData.length) notas.push(`${semData.length} carta(s) marcada(s) como enviada(s) sem uma data válida: não dá para contar os 30 dias.`);
+  if (notas.length) html += `<p class="section-sub" style="margin:-4px 0 14px 0;">${notas.join(" &nbsp;·&nbsp; ")}</p>`;
+  if (vencidas.length) {
+    html += `<div class="list-card" style="margin-bottom:16px; border-left:4px solid var(--amber-text);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div><strong>${vencidas.length} cliente(s) já passaram dos 30 dias da carta enviada</strong>
+          <div style="font-size:12px; color:var(--grey); margin-top:2px;">Já dá para marcar como Cancelado (depois do contato e da carta, o prazo acabou).</div></div>
+        <button class="btn-small acoes-edicao" onclick="cancelarVencidos()">Marcar todos como Cancelado</button>
+      </div>
+      <details ${vencidas.length <= 10 ? "open" : ""} style="margin-top:10px;"><summary style="cursor:pointer; font-size:13px; font-weight:700; color:var(--blue-dark);">Ver a lista (${vencidas.length})</summary>
+        <table style="width:100%; border-collapse:collapse; font-size:13px; margin-top:8px;">
+          <tr style="background:var(--blue-dark);"><th style="${th}">Cliente</th><th style="${th}">Torre · Regional</th><th style="${th}">Carta enviada em</th><th style="${th}">Prazo venceu em</th><th style="${th}">Dias</th><th class="acoes-edicao" style="${th}"></th></tr>
+          ${vencidas.map((c, i) => { const p = prazoCarta(c); return `<tr style="background:${i % 2 === 0 ? "var(--grey-light)" : "white"};">
+            <td style="padding:8px 10px; font-weight:600;">${esc(c.cliente)}</td><td style="padding:8px 10px;">${esc(c.torre)} · ${esc(c.regional)}</td>
+            <td style="padding:8px 10px;">${esc(c.dataEnvioCarta)}</td><td style="padding:8px 10px;">${p.vence}</td><td style="padding:8px 10px;">${p.dias}</td>
+            <td class="acoes-edicao" style="padding:8px 10px; text-align:right;"><button class="btn-small" onclick="updateClient(${c.id}, 'status', 'Cancelado')">Marcar Cancelado</button></td></tr>`; }).join("")}
+        </table></details>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+function cancelarVencidos() {
+  if (!exigirEdicao()) return;
+  const vencidas = data.filter(c => ehCancelamento(c.status) && c.status === ST_SERA && c.cartaEnviada && prazoCarta(c).vencido);
+  if (!vencidas.length) return;
+  if (!window.confirm(`Marcar ${vencidas.length} cliente(s) como Cancelado?\n\nSão os que já passaram dos ${PRAZO_CARTA_DIAS} dias desde a carta enviada.`)) return;
+  vencidas.forEach(c => {
+    c.status = ST_CANC;
+    c.atualizadoEm = new Date().toISOString();
+    c.atualizadoPor = nomeUsuario();
+    registrarHistorico("Status alterado", `${ST_SERA} → ${ST_CANC} (prazo de ${PRAZO_CARTA_DIAS} dias vencido)`, c.torre, c.cliente);
+  });
+  saveData();
+  renderAll();
+}
+
 function renderCartasList() {
   const cancelados = data.filter(d => ehCancelamento(d.status));
   const el = document.getElementById("cartasList");
+  renderCartasResumo(cancelados);
   if (cancelados.length === 0) { el.innerHTML = '<div class="empty-msg">Nenhum cliente a cancelar no momento.</div>'; return; }
 
   // Ordena: pendentes de envio primeiro
@@ -1724,7 +1799,11 @@ function renderCartasList() {
       <div class="priority-left"><strong>${c.cliente}</strong><span>${c.torre} · ${c.regional}</span></div>
       <div class="priority-mid">
         ${c.cartaEnviada
-          ? `<span class="tag tag-green">Enviada em ${c.dataEnvioCarta}</span>`
+          ? (() => { const p = prazoCarta(c);
+              const base = `<span class="tag tag-green">Enviada em ${esc(c.dataEnvioCarta)}${p.semData ? "" : ` · há ${p.dias} dia(s)`}</span>`;
+              if (c.status === ST_CANC) return base + ` <span class="tag tag-dark">Cancelado</span>`;
+              if (p.semData) return base;
+              return base + (p.vencido ? ` <span class="tag tag-amber">30 dias vencidos</span>` : ` <span class="tag tag-teal">faltam ${PRAZO_CARTA_DIAS - p.dias} dia(s)</span>`); })()
           : (c.status === ST_CANC ? `<span class="tag tag-dark">Cancelado</span>` : `<span class="tag tag-red">Será cancelado</span>`)}
       </div>
       <div class="acoes-edicao" style="display:flex; gap:6px; flex-wrap:wrap;">
