@@ -170,6 +170,9 @@
   .torres-cidade-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; border-bottom: 2px solid var(--teal); padding-bottom: 6px; margin-bottom: 10px; font-weight: 700; color: var(--blue-dark); font-size: 15px; }
   .torres-cidade-head span:last-child { font-size: 12px; color: var(--grey); font-weight: 700; }
   .torres-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+  .metric-card.clicavel { cursor: pointer; transition: box-shadow .15s, transform .15s; }
+  .metric-card.clicavel:hover { box-shadow: 0 2px 10px rgba(26,63,191,0.18); transform: translateY(-1px); }
+  .metric-card.selecionado { outline: 2px solid var(--blue); background: #F3F6FF; }
   .badge-concluida { background: var(--green-bg); color: var(--green-text); font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
   .torres-item { cursor: pointer; transition: border-color .15s, box-shadow .15s; display: flex; justify-content: space-between; align-items: center; gap: 8px; background: var(--grey-light); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
   .torres-item:hover { border-color: var(--blue); background: white; box-shadow: 0 1px 6px rgba(26,63,191,0.15); }
@@ -403,6 +406,19 @@
     <div class="view" id="view-cartas">
       <h2 class="section-title">Cartas de distrato</h2>
       <p class="section-sub">Clientes que serão cancelados (e os já cancelados) — gere e envie a carta de encerramento. Depois do contato e da carta enviada, mude o status para Cancelado.</p>
+      <div class="controls" style="margin-bottom:14px;">
+        <input type="text" id="cartasBusca" placeholder="Buscar cliente ou torre..." oninput="renderCartasList()">
+        <select id="cartasRegional" onchange="renderCartasList()"><option value="">Todas as regionais</option></select>
+        <select id="cartasSituacao" onchange="renderCartasList()">
+          <option value="">Todas as situações</option>
+          <option value="aEnviar">Cartas a enviar</option>
+          <option value="noPrazo">Enviadas, no prazo</option>
+          <option value="vencidos">30 dias vencidos</option>
+          <option value="cancelados">Já cancelados</option>
+        </select>
+        <button class="btn-ghost" onclick="limparFiltroCartas()">Limpar filtros</button>
+        <span id="cartasContagem" style="font-size:13px; color:var(--grey); font-weight:700;"></span>
+      </div>
       <div id="cartasResumo"></div>
       <div class="list-card"><div id="cartasList"></div></div>
     </div>
@@ -1723,7 +1739,7 @@ function prazoCarta(c) {   // a partir da data em que a carta foi marcada como e
   const venceData = new Date(env); venceData.setDate(venceData.getDate() + PRAZO_CARTA_DIAS);
   return { semData: false, vencido: dias >= PRAZO_CARTA_DIAS, dias: dias, vence: venceData.toLocaleDateString("pt-BR"), venceData: venceData };
 }
-function renderCartasResumo(cancelados) {
+function renderCartasResumo(cancelados, sel) {
   const el = document.getElementById("cartasResumo");
   if (!el) return;
   if (cancelados.length === 0) { el.innerHTML = ""; return; }
@@ -1742,10 +1758,10 @@ function renderCartasResumo(cancelados) {
   }
   const th = "padding:7px 10px; color:white; font-size:11px; text-align:left;";
   let html = `<div class="card-grid" style="margin-bottom:14px;">
-    <div class="metric-card c-red"><div class="label">Cartas a enviar</div><div class="num">${aEnviar.length}</div></div>
-    <div class="metric-card c-teal"><div class="label">Enviadas, no prazo</div><div class="num">${noPrazo.length}</div></div>
-    <div class="metric-card c-amber"><div class="label">30 dias vencidos</div><div class="num">${vencidas.length}</div></div>
-    <div class="metric-card c-dark"><div class="label">Já cancelados</div><div class="num">${jaCancelados.length}</div></div>
+    <div class="metric-card c-red clicavel ${sel === "aEnviar" ? "selecionado" : ""}" onclick="filtrarCartas('aEnviar')" title="Clique para filtrar a lista"><div class="label">Cartas a enviar</div><div class="num">${aEnviar.length}</div></div>
+    <div class="metric-card c-teal clicavel ${sel === "noPrazo" ? "selecionado" : ""}" onclick="filtrarCartas('noPrazo')" title="Clique para filtrar a lista"><div class="label">Enviadas, no prazo</div><div class="num">${noPrazo.length}</div></div>
+    <div class="metric-card c-amber clicavel ${sel === "vencidos" ? "selecionado" : ""}" onclick="filtrarCartas('vencidos')" title="Clique para filtrar a lista"><div class="label">30 dias vencidos</div><div class="num">${vencidas.length}</div></div>
+    <div class="metric-card c-dark clicavel ${sel === "cancelados" ? "selecionado" : ""}" onclick="filtrarCartas('cancelados')" title="Clique para filtrar a lista"><div class="label">Já cancelados</div><div class="num">${jaCancelados.length}</div></div>
   </div>`;
   const notas = [];
   if (proximo) notas.push(proximo);
@@ -1772,9 +1788,10 @@ function renderCartasResumo(cancelados) {
 }
 function cancelarVencidos() {
   if (!exigirEdicao()) return;
-  const vencidas = data.filter(c => ehCancelamento(c.status) && c.status === ST_SERA && c.cartaEnviada && prazoCarta(c).vencido);
+  const vencidas = cartasBaseFiltrada().filter(c => c.status === ST_SERA && c.cartaEnviada && prazoCarta(c).vencido);   // so os que aparecem na caixa (respeita regional e busca)
   if (!vencidas.length) return;
-  if (!window.confirm(`Marcar ${vencidas.length} cliente(s) como Cancelado?\n\nSão os que já passaram dos ${PRAZO_CARTA_DIAS} dias desde a carta enviada.`)) return;
+  const filtrado = !!((document.getElementById("cartasRegional") || {}).value || (document.getElementById("cartasBusca") || {}).value);
+  if (!window.confirm(`Marcar ${vencidas.length} cliente(s) como Cancelado?\n\nSão os que já passaram dos ${PRAZO_CARTA_DIAS} dias desde a carta enviada${filtrado ? ", dentro do filtro que está na tela" : ""}.`)) return;
   vencidas.forEach(c => {
     c.status = ST_CANC;
     c.atualizadoEm = new Date().toISOString();
@@ -1785,14 +1802,53 @@ function cancelarVencidos() {
   renderAll();
 }
 
+// situacao de cada cliente na fila de cartas (um cliente pode estar em mais de uma, ex.: Cancelado sem carta enviada)
+function situacaoCartaBate(c, sit) {
+  if (!sit) return true;
+  const p = prazoCarta(c);
+  if (sit === "aEnviar") return !c.cartaEnviada;
+  if (sit === "noPrazo") return c.cartaEnviada && c.status === ST_SERA && p && !p.vencido && !p.semData;
+  if (sit === "vencidos") return c.cartaEnviada && c.status === ST_SERA && p && p.vencido;
+  if (sit === "cancelados") return c.status === ST_CANC;
+  return true;
+}
+function filtrarCartas(sit) {   // clicar no cartao aplica o filtro; clicar de novo tira
+  const s = document.getElementById("cartasSituacao");
+  s.value = (s.value === sit) ? "" : sit;
+  renderCartasList();
+}
+function limparFiltroCartas() {
+  document.getElementById("cartasBusca").value = "";
+  document.getElementById("cartasRegional").value = "";
+  document.getElementById("cartasSituacao").value = "";
+  renderCartasList();
+}
+function cartasBaseFiltrada() {   // fila de cartas com a regional e a busca que estao na tela
+  const reg = (document.getElementById("cartasRegional") || {}).value || "";
+  const busca = ((document.getElementById("cartasBusca") || {}).value || "").trim().toLowerCase();
+  return data.filter(d => ehCancelamento(d.status) && (!reg || d.regional === reg) && (!busca || d.cliente.toLowerCase().includes(busca) || d.torre.toLowerCase().includes(busca)));
+}
 function renderCartasList() {
-  const cancelados = data.filter(d => ehCancelamento(d.status));
+  const todos = data.filter(d => ehCancelamento(d.status));
   const el = document.getElementById("cartasList");
-  renderCartasResumo(cancelados);
-  if (cancelados.length === 0) { el.innerHTML = '<div class="empty-msg">Nenhum cliente a cancelar no momento.</div>'; return; }
+  // regionais disponiveis (mantem a escolha atual)
+  const selReg = document.getElementById("cartasRegional");
+  const regs = [...new Set(todos.map(d => d.regional))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const regAtual = selReg.value;
+  selReg.innerHTML = '<option value="">Todas as regionais</option>' + regs.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+  selReg.value = regs.includes(regAtual) ? regAtual : "";
+  const busca = (document.getElementById("cartasBusca").value || "").trim().toLowerCase();
+  const sit = document.getElementById("cartasSituacao").value;
+  // regional e busca valem para os cartoes e para a lista; a situacao so filtra a lista
+  const cancelados = cartasBaseFiltrada();
+  renderCartasResumo(cancelados, sit);
+  const lista = cancelados.filter(c => situacaoCartaBate(c, sit));
+  document.getElementById("cartasContagem").textContent = (selReg.value || busca || sit) ? `${lista.length} de ${todos.length} cliente(s)` : "";
+  if (todos.length === 0) { el.innerHTML = '<div class="empty-msg">Nenhum cliente a cancelar no momento.</div>'; return; }
+  if (lista.length === 0) { el.innerHTML = '<div class="empty-msg">Nenhum cliente encontrado com esse filtro.</div>'; return; }
 
   // Ordena: pendentes de envio primeiro
-  const ordenados = [...cancelados].sort((a, b) => (a.cartaEnviada === b.cartaEnviada) ? 0 : (a.cartaEnviada ? 1 : -1));
+  const ordenados = [...lista].sort((a, b) => (a.cartaEnviada === b.cartaEnviada) ? 0 : (a.cartaEnviada ? 1 : -1));
 
   el.innerHTML = ordenados.map(c => `
     <div class="priority-row">
