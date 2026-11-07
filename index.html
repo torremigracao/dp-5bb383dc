@@ -219,6 +219,9 @@
   @page { size: A4; margin: 0; }
   @media print {
     html, body { background: #fff !important; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; }
     .app, .login-overlay { display: none !important; }
     body * { visibility: hidden; }
     .carta-content, .carta-content * { visibility: visible; }
@@ -417,6 +420,7 @@
           <option value="cancelados">Já cancelados</option>
         </select>
         <button class="btn-ghost" onclick="limparFiltroCartas()">Limpar filtros</button>
+        <button class="btn-primary" onclick="abrirCartasPdf()">Gerar PDF</button>
         <span id="cartasContagem" style="font-size:13px; color:var(--grey); font-weight:700;"></span>
       </div>
       <div id="cartasResumo"></div>
@@ -1816,6 +1820,61 @@ function filtrarCartas(sit) {   // clicar no cartao aplica o filtro; clicar de n
   const s = document.getElementById("cartasSituacao");
   s.value = (s.value === sit) ? "" : sit;
   renderCartasList();
+}
+function abrirCartasPdf() {
+  document.getElementById("pdfModalTitle").innerHTML = "<strong>Cartas de distrato</strong>";
+  document.getElementById("periodoSeletor").style.display = "none";
+  const sit = document.getElementById("cartasSituacao").value;
+  const reg = document.getElementById("cartasRegional").value;
+  const busca = document.getElementById("cartasBusca").value.trim();
+  const base = cartasBaseFiltrada();                       // regional e busca valem para o resumo e para a lista
+  const lista = base.filter(c => situacaoCartaBate(c, sit));
+  const ROT = { aEnviar: "Cartas a enviar", noPrazo: "Enviadas, no prazo", vencidos: "30 dias vencidos", cancelados: "Já cancelados" };
+  const filtros = [reg ? `Regional: ${reg}` : "Todas as regionais", sit ? `Situação: ${ROT[sit]}` : "Todas as situações"].concat(busca ? [`Busca: "${busca}"`] : []);
+  const conta = (s) => base.filter(c => situacaoCartaBate(c, s)).length;
+  const semData = base.filter(c => c.cartaEnviada && c.status === ST_SERA && prazoCarta(c).semData).length;
+  // ordem: mais atrasados primeiro, depois quem vence antes, depois as cartas a enviar, depois os ja cancelados
+  const ordem = (c) => {
+    const p = prazoCarta(c);
+    if (c.status === ST_CANC) return [4, 0];
+    if (!c.cartaEnviada) return [2, 0];
+    if (p.semData) return [3, 0];
+    return p.vencido ? [0, -p.dias] : [1, p.venceData.getTime()];
+  };
+  const ordenada = [...lista].sort((a, b) => { const x = ordem(a), y = ordem(b); return x[0] - y[0] || x[1] - y[1] || a.cliente.localeCompare(b.cliente, "pt-BR"); });
+  const th = "padding:7px 8px; color:white; font-size:11px; text-align:left;";
+  const linhas = ordenada.map((c, i) => {
+    const p = prazoCarta(c);
+    let situ, cor, prazo = "";
+    if (c.status === ST_CANC) { situ = "Cancelado"; cor = "#7A1F1F"; }
+    else if (!c.cartaEnviada) { situ = "Carta a enviar"; cor = "#B00020"; }
+    else if (p.semData) { situ = "Data de envio inválida"; cor = "#7A6A00"; }
+    else if (p.vencido) { situ = "30 dias vencidos"; cor = "#B45309"; prazo = `venceu em ${p.vence}`; }
+    else { situ = `Faltam ${PRAZO_CARTA_DIAS - p.dias} dia(s)`; cor = "#0E8A78"; prazo = `vence em ${p.vence}`; }
+    const enviada = c.cartaEnviada ? esc(c.dataEnvioCarta) + (p.semData ? "" : ` (há ${p.dias} dia(s))`) : "—";
+    const bg = i % 2 === 1 ? "background:#EEF2FF;" : "";
+    return `<tr style="${bg}"><td style="padding:6px 8px; font-weight:700;">${esc(c.cliente)}</td><td style="padding:6px 8px;">${esc(c.torre)}<br><span style="color:var(--grey); font-size:10px;">${esc(c.regional)}</span></td>
+      <td style="padding:6px 8px;">${c.status === ST_CANC ? "Cancelado" : "Será cancelado"}</td><td style="padding:6px 8px;">${enviada}</td>
+      <td style="padding:6px 8px; color:${cor}; font-weight:700;">${situ}${prazo ? `<br><span style="font-weight:400; font-size:10px; color:var(--grey);">${prazo}</span>` : ""}</td></tr>`;
+  }).join("");
+  const logo = document.querySelector("#loginOverlay img").src;
+  const caixa = (rot, n, cor) => `<td style="padding:8px 10px; border:1px solid #C5CAD8; text-align:center; width:25%;"><div style="font-size:10px; color:var(--grey); font-weight:700; text-transform:uppercase;">${rot}</div><div style="font-size:20px; font-weight:700; color:${cor};">${n}</div></td>`;
+  document.getElementById("resumoPdfContent").innerHTML = `
+    <img class="logo" src="${logo}" alt="UNI Internet">
+    <hr class="divider">
+    <h2 style="margin-bottom:2px;">Cartas de distrato — acompanhamento do prazo</h2>
+    <p style="font-style:italic; color:var(--grey); margin-top:0; margin-bottom:4px;">Gerado em ${new Date().toLocaleDateString("pt-BR")} por ${esc(nomeUsuario())}</p>
+    <p style="font-size:12px; color:var(--grey); margin-top:0; margin-bottom:10px;">${filtros.join(" &nbsp;·&nbsp; ")}</p>
+    <table style="width:100%; border-collapse:collapse; margin-bottom:6px;"><tr>
+      ${caixa("Cartas a enviar", conta("aEnviar"), "#B00020")}${caixa("Enviadas, no prazo", conta("noPrazo"), "#0E8A78")}${caixa("30 dias vencidos", conta("vencidos"), "#B45309")}${caixa("Já cancelados", conta("cancelados"), "#7A1F1F")}
+    </tr></table>
+    <p style="font-size:11px; color:var(--grey); margin:0 0 10px 0;">O prazo de ${PRAZO_CARTA_DIAS} dias conta a partir da data em que a carta foi entregue.${semData ? ` ${semData} carta(s) sem data válida não entram na contagem de prazo.` : ""}</p>
+    <p style="font-size:12px; margin:0 0 6px 0;"><strong>${lista.length} cliente(s) nesta lista</strong></p>
+    ${lista.length ? `<table style="width:100%; border-collapse:collapse; font-size:11px;">
+      <thead><tr style="background:var(--blue-dark);"><th style="${th}">Cliente</th><th style="${th}">Torre · Regional</th><th style="${th}">Status</th><th style="${th}">Carta enviada</th><th style="${th}">Prazo</th></tr></thead>
+      <tbody>${linhas}</tbody></table>` : '<div class="empty-msg">Nenhum cliente nesta seleção.</div>'}
+    <div class="footer-note">UNI Internet, unindo pessoas, fortalecendo conexões. · Central de Atendimento: 2201-0300</div>`;
+  document.getElementById("resumoPdfModal").classList.add("show");
 }
 function limparFiltroCartas() {
   document.getElementById("cartasBusca").value = "";
