@@ -8,6 +8,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
 <style>
   :root {
     --blue: #2D5FFF;
@@ -412,6 +414,7 @@
       <div class="controls" style="margin-bottom:14px;">
         <input type="text" id="cartasBusca" placeholder="Buscar cliente ou torre..." oninput="renderCartasList()">
         <select id="cartasRegional" onchange="renderCartasList()"><option value="">Todas as regionais</option></select>
+        <select id="cartasTorre" onchange="renderCartasList()"><option value="">Todas as torres</option></select>
         <select id="cartasSituacao" onchange="renderCartasList()">
           <option value="">Todas as situações</option>
           <option value="aEnviar">Cartas a enviar</option>
@@ -424,6 +427,15 @@
         <span id="cartasContagem" style="font-size:13px; color:var(--grey); font-weight:700;"></span>
       </div>
       <div id="cartasResumo"></div>
+      <div class="acoes-edicao">
+        <div class="list-card" id="cartasLote" style="margin-bottom:12px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:700; cursor:pointer;"><input type="checkbox" id="cartasSelTodos" onchange="selecionarTodasCartas(this.checked)"> Selecionar todos da lista</label>
+          <span id="cartasSelContagem" style="font-size:13px; color:var(--grey); font-weight:700;"></span>
+          <span style="flex:1;"></span>
+          <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:700;">Data de desligamento <input type="date" id="cartasDataDeslig" style="padding:7px 10px; border-radius:8px; border:1px solid var(--border); font-size:13px;"></label>
+          <button class="btn-primary" id="btnGerarCartasLote" onclick="gerarCartasLote()" disabled>Gerar cartas em PDF</button>
+        </div>
+      </div>
       <div class="list-card"><div id="cartasList"></div></div>
     </div>
 
@@ -1821,6 +1833,152 @@ function filtrarCartas(sit) {   // clicar no cartao aplica o filtro; clicar de n
   s.value = (s.value === sit) ? "" : sit;
   renderCartasList();
 }
+// ===== Cartas em lote: um PDF por cliente (nome do cliente no arquivo), entregues num .zip =====
+const cartasSelecionadas = new Set();
+let cartasListaAtual = [];
+function cartasSelecionadasVisiveis() { return cartasListaAtual.filter(c => cartasSelecionadas.has(c.id)); }
+function atualizarBarraLote() {
+  const n = cartasSelecionadasVisiveis().length, total = cartasListaAtual.length;
+  const todos = document.getElementById("cartasSelTodos");
+  todos.checked = total > 0 && n === total;
+  todos.indeterminate = n > 0 && n < total;
+  document.getElementById("cartasSelContagem").textContent = `${n} selecionado(s) de ${total}`;
+  const btn = document.getElementById("btnGerarCartasLote");
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Gerar ${n} carta(s) em PDF` : "Gerar cartas em PDF";
+}
+function alternarCartaSel(id, marcado) { if (marcado) cartasSelecionadas.add(id); else cartasSelecionadas.delete(id); atualizarBarraLote(); }
+function selecionarTodasCartas(marcado) {
+  cartasListaAtual.forEach(c => { if (marcado) cartasSelecionadas.add(c.id); else cartasSelecionadas.delete(c.id); });
+  document.querySelectorAll("#cartasList .chk-carta").forEach(ch => { ch.checked = marcado; });
+  atualizarBarraLote();
+}
+// texto com trechos em negrito, quebrado em linhas e justificado
+function paragrafoRico(doc, runs, x, y, largura, alt, tam, cor) {
+  doc.setFontSize(tam); doc.setTextColor(cor[0], cor[1], cor[2]);
+  // mede letra por letra: a biblioteca desenha sem o ajuste de pares (kerning), entao medir a palavra inteira daria menos do que ela ocupa
+  const larg = (t, b) => { doc.setFont("helvetica", b ? "bold" : "normal"); let w = 0; for (const ch of t) w += doc.getStringUnitWidth(ch); return w * doc.getFontSize() / doc.internal.scaleFactor; };
+  const palavras = []; let colar = false;   // uma "palavra" pode ter varios trechos (ex.: NOME em negrito + virgula normal)
+  runs.forEach(([texto, b]) => texto.split(/(\s+)/).filter(s => s.length).forEach(s => {
+    if (/^\s+$/.test(s)) { colar = false; return; }
+    if (colar && palavras.length) palavras[palavras.length - 1].partes.push({ t: s, b: b });
+    else palavras.push({ partes: [{ t: s, b: b }] });
+    colar = true;
+  }));
+  palavras.forEach(p => { p.w = p.partes.reduce((s, q) => s + larg(q.t, q.b), 0); });
+  const esp = larg(" ", 0), linhas = []; let atual = [], usado = 0;
+  palavras.forEach(p => {
+    const novo = atual.length ? usado + esp + p.w : p.w;
+    if (novo > largura && atual.length) { linhas.push(atual); atual = [p]; usado = p.w; } else { atual.push(p); usado = novo; }
+  });
+  if (atual.length) linhas.push(atual);
+  linhas.forEach((ln, i) => {
+    const soma = ln.reduce((s, p) => s + p.w, 0);
+    const ultima = i === linhas.length - 1;
+    const gap = (!ultima && ln.length > 1) ? (largura - soma) / (ln.length - 1) : esp;
+    let cx = x;
+    ln.forEach(p => { p.partes.forEach(q => { doc.setFont("helvetica", q.b ? "bold" : "normal"); doc.text(q.t, cx, y); cx += larg(q.t, q.b); }); cx += gap; });
+    y += alt;
+  });
+  return y;
+}
+function montarPdfCarta(item, dataBR, logo) {
+  const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4" });
+  const W = 210, ML = 20, CW = 170;
+  const AZUL = [26, 63, 191], TXT = [46, 46, 58], CINZA = [107, 118, 144], TEAL = [39, 217, 191];
+  const gerente = GERENTES_POR_REGIONAL[item.regional] || "Gerente de Unidade";
+  let y = 16;
+  if (logo) { const h = 17, w = h * logo.w / logo.h; doc.addImage(logo.src, "PNG", ML, y, w, h); y += h + 5; }
+  doc.setDrawColor(TEAL[0], TEAL[1], TEAL[2]); doc.setLineWidth(0.8); doc.line(ML, y, ML + CW, y); y += 10;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(15); doc.setTextColor(AZUL[0], AZUL[1], AZUL[2]);
+  doc.text("COMUNICADO DE ENCERRAMENTO DO SERVIÇO", ML, y); y += 10;
+  const par = (runs) => { y = paragrafoRico(doc, runs, ML, y, CW, 5.7, 10.5, TXT) + 3.6; };
+  par([["Prezado(a) amigo(a) e cliente ", 0], [item.cliente.toUpperCase(), 1], [",", 0]]);
+  par([[`Informamos que a torre de transmissão que atende sua região (${item.torre}) será desativada. Após análise técnica, infelizmente não identificamos viabilidade para migração do seu serviço para outra torre ou para nossa rede de fibra óptica.`, 0]]);
+  par([["Por esse motivo, será necessário encerrar o serviço no seu endereço.", 0]]);
+  par([["Para que você tenha tempo de contratar outro provedor e não fique sem conexão, estamos comunicando com 30 (trinta) dias de antecedência. O desligamento está previsto para ", 0], [dataBR, 1], [".", 0]]);
+  par([["Como o encerramento ocorre por iniciativa da Uni Internet devido à impossibilidade técnica de continuidade do serviço, ", 0], ["não haverá cobrança de multa de fidelidade", 1], [", nem cobranças referentes ao período posterior ao desligamento.", 0]]);
+  par([["Caso existam equipamentos da Uni Internet em comodato (antena, roteador ou outro aparelho), nossa equipe entrará em contato para agendar a retirada sem nenhum custo.", 0]]);
+  par([["Lamentamos o transtorno e esperamos poder atendê-lo(a) novamente no futuro.", 0]]);
+  // caixa de agradecimento
+  y += 2;
+  doc.setFont("helvetica", "italic"); doc.setFontSize(10.5);
+  const linhasBox = doc.splitTextToSize("Obrigado por ter caminhado com a Uni Internet até aqui. Foi um prazer ter você como cliente, e levamos essa parceria com carinho.", CW - 14);
+  const hBox = linhasBox.length * 5.6 + 7;
+  doc.setFillColor(228, 251, 247); doc.setDrawColor(TEAL[0], TEAL[1], TEAL[2]); doc.setLineWidth(0.4); doc.roundedRect(ML, y, CW, hBox, 2, 2, "FD");
+  doc.setTextColor(AZUL[0], AZUL[1], AZUL[2]);
+  linhasBox.forEach((l, i) => doc.text(l, W / 2, y + 6.5 + i * 5.6, { align: "center" }));
+  y += hBox + 8;
+  // assinatura
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(TXT[0], TXT[1], TXT[2]);
+  doc.text("Atenciosamente,", ML, y); y += 20;
+  doc.setDrawColor(154, 165, 184); doc.setLineWidth(0.3); doc.line(W / 2 - 32, y, W / 2 + 32, y); y += 5.5;
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.text(gerente, W / 2, y, { align: "center" }); y += 5;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(CINZA[0], CINZA[1], CINZA[2]);
+  doc.text(`Gerente de Unidade - ${item.regional}`, W / 2, y, { align: "center" }); y += 12;
+  doc.setDrawColor(227, 232, 245); doc.setLineWidth(0.3); doc.line(ML, y, ML + CW, y); y += 5;
+  doc.setFontSize(8); doc.text("UNI Internet, unindo pessoas, fortalecendo conexões. · Central de Atendimento: 2201-0300", W / 2, y, { align: "center" });
+  return doc;
+}
+function carregarLogoCarta() {
+  return new Promise(res => {
+    const src = (document.querySelector("#loginOverlay img") || {}).src;
+    if (!src) return res(null);
+    const im = new Image();
+    im.onload = () => res({ src: src, w: im.naturalWidth, h: im.naturalHeight });
+    im.onerror = () => res(null);
+    im.src = src;
+  });
+}
+function nomeArquivoPdf(cliente, usados) {
+  const base = String(cliente).replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "Cliente";
+  let nome = base, n = 2;
+  while (usados[nome.toLowerCase()]) nome = `${base} (${n++})`;
+  usados[nome.toLowerCase()] = true;
+  return nome + ".pdf";
+}
+function baixarBlob(blob, nome) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = nome;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+async function gerarCartasLote() {
+  if (!exigirEdicao()) return;
+  const sel = cartasSelecionadasVisiveis();
+  if (!sel.length) return;
+  if (!window.jspdf || !window.JSZip) { alert("Não foi possível carregar o gerador de PDF (ele precisa de internet). Recarregue a página e tente de novo."); return; }
+  const iso = document.getElementById("cartasDataDeslig").value;
+  if (!iso) { alert("Escolha a data de desligamento."); return; }
+  const dataBR = formatarDataBR(iso);
+  const btn = document.getElementById("btnGerarCartasLote"), rotulo = btn.textContent;
+  btn.disabled = true;
+  try {
+    const logo = await carregarLogoCarta();
+    const zip = new window.JSZip(), usados = {}; let ultimo = null;
+    for (let i = 0; i < sel.length; i++) {
+      btn.textContent = `Gerando ${i + 1}/${sel.length}...`;
+      await new Promise(r => setTimeout(r, 0));
+      const doc = montarPdfCarta(sel[i], dataBR, logo);
+      const nome = nomeArquivoPdf(sel[i].cliente, usados);
+      const bytes = doc.output("arraybuffer");
+      zip.file(nome, bytes); ultimo = { nome: nome, bytes: bytes };
+    }
+    const torres = [...new Set(sel.map(c => c.torre))], regs = [...new Set(sel.map(c => c.regional))];
+    if (sel.length === 1) baixarBlob(new Blob([ultimo.bytes], { type: "application/pdf" }), ultimo.nome);
+    else {
+      const nomeZip = torres.length === 1 ? `Cartas - ${torres[0]}` : regs.length === 1 ? `Cartas - ${regs[0]}` : `Cartas de distrato - ${new Date().toLocaleDateString("pt-BR").replace(/\//g, "-")}`;
+      baixarBlob(await zip.generateAsync({ type: "blob" }), nomeArquivoPdf(nomeZip, {}).replace(/\.pdf$/, ".zip"));
+    }
+    registrarHistorico("Cartas de distrato geradas", `${sel.length} carta(s) em PDF${sel.length > 1 ? " (arquivo .zip)" : ""}`, torres.length === 1 ? torres[0] : "várias torres", "");
+  } catch (e) {
+    console.error(e);
+    alert("Não foi possível gerar os PDFs. Tente de novo ou use o botão 'Gerar carta' de cada cliente.");
+  } finally {
+    btn.textContent = rotulo; atualizarBarraLote();
+  }
+}
+
 function abrirCartasPdf() {
   document.getElementById("pdfModalTitle").innerHTML = "<strong>Cartas de distrato</strong>";
   document.getElementById("periodoSeletor").style.display = "none";
@@ -1879,13 +2037,15 @@ function abrirCartasPdf() {
 function limparFiltroCartas() {
   document.getElementById("cartasBusca").value = "";
   document.getElementById("cartasRegional").value = "";
+  document.getElementById("cartasTorre").value = "";
   document.getElementById("cartasSituacao").value = "";
   renderCartasList();
 }
 function cartasBaseFiltrada() {   // fila de cartas com a regional e a busca que estao na tela
   const reg = (document.getElementById("cartasRegional") || {}).value || "";
+  const torre = (document.getElementById("cartasTorre") || {}).value || "";
   const busca = ((document.getElementById("cartasBusca") || {}).value || "").trim().toLowerCase();
-  return data.filter(d => ehCancelamento(d.status) && (!reg || d.regional === reg) && (!busca || d.cliente.toLowerCase().includes(busca) || d.torre.toLowerCase().includes(busca)));
+  return data.filter(d => ehCancelamento(d.status) && (!reg || d.regional === reg) && (!torre || d.torre === torre) && (!busca || d.cliente.toLowerCase().includes(busca) || d.torre.toLowerCase().includes(busca)));
 }
 function renderCartasList() {
   const todos = data.filter(d => ehCancelamento(d.status));
@@ -1896,13 +2056,22 @@ function renderCartasList() {
   const regAtual = selReg.value;
   selReg.innerHTML = '<option value="">Todas as regionais</option>' + regs.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
   selReg.value = regs.includes(regAtual) ? regAtual : "";
+  // torres disponiveis (dentro da regional escolhida; mantem a escolha atual)
+  const selTor = document.getElementById("cartasTorre");
+  const torres = [...new Set(todos.filter(d => !selReg.value || d.regional === selReg.value).map(d => d.torre))].sort();
+  const torAtual = selTor.value;
+  selTor.innerHTML = '<option value="">Todas as torres</option>' + torres.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+  selTor.value = torres.includes(torAtual) ? torAtual : "";
   const busca = (document.getElementById("cartasBusca").value || "").trim().toLowerCase();
   const sit = document.getElementById("cartasSituacao").value;
   // regional e busca valem para os cartoes e para a lista; a situacao so filtra a lista
   const cancelados = cartasBaseFiltrada();
   renderCartasResumo(cancelados, sit);
   const lista = cancelados.filter(c => situacaoCartaBate(c, sit));
-  document.getElementById("cartasContagem").textContent = (selReg.value || busca || sit) ? `${lista.length} de ${todos.length} cliente(s)` : "";
+  document.getElementById("cartasContagem").textContent = (selReg.value || selTor.value || busca || sit) ? `${lista.length} de ${todos.length} cliente(s)` : "";
+  cartasListaAtual = lista;
+  if (!document.getElementById("cartasDataDeslig").value) { const d = new Date(); d.setDate(d.getDate() + PRAZO_CARTA_DIAS); document.getElementById("cartasDataDeslig").value = d.toISOString().split("T")[0]; }
+  atualizarBarraLote();
   if (todos.length === 0) { el.innerHTML = '<div class="empty-msg">Nenhum cliente a cancelar no momento.</div>'; return; }
   if (lista.length === 0) { el.innerHTML = '<div class="empty-msg">Nenhum cliente encontrado com esse filtro.</div>'; return; }
 
@@ -1911,7 +2080,10 @@ function renderCartasList() {
 
   el.innerHTML = ordenados.map(c => `
     <div class="priority-row">
-      <div class="priority-left"><strong>${c.cliente}</strong><span>${c.torre} · ${c.regional}</span></div>
+      <div class="priority-left" style="display:flex; align-items:center; gap:10px;">
+        <input type="checkbox" class="chk-carta acoes-edicao" data-id="${c.id}" ${cartasSelecionadas.has(c.id) ? "checked" : ""} onchange="alternarCartaSel(${c.id}, this.checked)" title="Selecionar para gerar a carta em PDF">
+        <div><strong>${c.cliente}</strong><span>${c.torre} · ${c.regional}</span></div>
+      </div>
       <div class="priority-mid">
         ${c.cartaEnviada
           ? (() => { const p = prazoCarta(c);
