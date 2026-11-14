@@ -919,6 +919,14 @@ async function copiarTorres(btn) {
   catch (e) { const ta = document.createElement("textarea"); ta.value = texto; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } catch (e2) {} ta.remove(); }
   if (btn) { const antes = btn.textContent; btn.textContent = "Copiado!"; setTimeout(() => { btn.textContent = antes; }, 1500); }
 }
+// etiqueta que identifica no PDF as torres ja resolvidas
+function etiquetaTorrePdf(torre) {
+  const estilo = "display:inline-block; margin-left:6px; padding:1px 7px; border-radius:10px; font-size:9px; font-weight:700; vertical-align:middle;";
+  if (torreEstaDesmontada(torre)) return `<span style="${estilo} background:#E3E8F5; color:#4A5470; border:1px solid #B7C0D8;">Desmontada</span>`;
+  if (torreResolvidaMantida(torre)) return `<span style="${estilo} background:#E4F6EF; color:#0F6E56; border:1px solid #8FD3BB;">Concluída · continua ativa</span>`;
+  if (torreConcluida(torre)) return `<span style="${estilo} background:#E4F6EF; color:#0F6E56; border:1px solid #8FD3BB;">Concluída</span>`;
+  return "";
+}
 function abrirTorresPdf() {
   document.getElementById("pdfModalTitle").innerHTML = "<strong>Torres por cidade</strong>";
   document.getElementById("periodoSeletor").style.display = "none";
@@ -927,23 +935,26 @@ function abrirTorresPdf() {
   const busca = document.getElementById("torresBusca").value;
   const filtros = [cidadeSel ? `Cidade: ${cidadeSel}` : "Todas as cidades"].concat(busca ? [`Busca: "${busca}"`] : []);
   const th = 'padding:7px 8px; color:white; font-size:11px; text-align:left;';
-  let corpo = "", totT = 0, totC = 0;
+  let corpo = "", totT = 0, totC = 0, totConc = 0, totDesm = 0;
   grupos.forEach(g => {
     const cli = g.torres.reduce((s, [, n]) => s + n, 0);
     totT += g.torres.length; totC += cli;
+    const nConc = g.torres.filter(([t]) => !torreEstaDesmontada(t) && torreConcluida(t)).length;
+    totConc += nConc; totDesm += g.torres.filter(([t]) => torreEstaDesmontada(t)).length;
     const meio = Math.ceil(g.torres.length / 2);
     let linhas = "";
     for (let i = 0; i < meio; i++) {
       const a = g.torres[i], b = g.torres[i + meio];
       const bg = i % 2 === 1 ? "background:#EEF2FF;" : "";
-      linhas += `<tr style="${bg}"><td style="padding:5px 8px; font-weight:700;">${esc(a[0])}</td><td style="padding:5px 8px; text-align:center;">${a[1]}</td>` +
-        (b ? `<td style="padding:5px 8px; font-weight:700;">${esc(b[0])}</td><td style="padding:5px 8px; text-align:center;">${b[1]}</td>` : "<td></td><td></td>") + "</tr>";
+      linhas += `<tr style="${bg}"><td style="padding:5px 8px; font-weight:700;">${esc(a[0])}${etiquetaTorrePdf(a[0])}</td><td style="padding:5px 8px; text-align:center;">${a[1]}</td>` +
+        (b ? `<td style="padding:5px 8px; font-weight:700;">${esc(b[0])}${etiquetaTorrePdf(b[0])}</td><td style="padding:5px 8px; text-align:center;">${b[1]}</td>` : "<td></td><td></td>") + "</tr>";
     }
-    corpo += `<h3 style="margin:16px 0 6px 0; color:var(--blue-dark); font-size:15px;">${esc(g.cidade)} <span style="font-size:11px; color:var(--grey); font-weight:700;">&nbsp;${g.torres.length} torre(s) · ${cli} cliente(s)</span></h3>
+    corpo += `<h3 style="margin:16px 0 6px 0; color:var(--blue-dark); font-size:15px;">${esc(g.cidade)} <span style="font-size:11px; color:var(--grey); font-weight:700;">&nbsp;${g.torres.length} torre(s) · ${cli} cliente(s)${nConc ? ` · ${nConc} concluída(s)` : ""}</span></h3>
       <table style="width:100%; border-collapse:collapse; font-size:12px; page-break-inside:auto;">
         <tr style="background:var(--blue-dark);"><th style="${th}">Torre</th><th style="${th} text-align:center;">Clientes</th><th style="${th}">Torre</th><th style="${th} text-align:center;">Clientes</th></tr>${linhas}</table>`;
   });
-  const total = grupos.length > 1 ? `<p style="margin-top:14px; font-size:13px;"><strong>Total: ${totT} torres · ${totC} clientes</strong></p>` : "";
+  const total = (grupos.length > 1 ? `<p style="margin-top:14px; font-size:13px;"><strong>Total: ${totT} torres · ${totC} clientes${totConc ? ` · ${totConc} torre(s) concluída(s)` : ""}</strong></p>` : "") +
+    ((totConc || totDesm) ? `<p style="font-size:10px; color:var(--grey); margin:6px 0 0 0;">${totConc ? "<strong>Concluída</strong>: todos os clientes da torre já foram resolvidos (migrados, ou cancelados com a carta enviada). " : ""}${totDesm ? "<strong>Desmontada</strong>: a torre já foi desmontada." : ""}</p>` : "");
   const logo = document.querySelector("#loginOverlay img").src;
   document.getElementById("resumoPdfContent").innerHTML = `
     <img class="logo" src="${logo}" alt="UNI Internet">
