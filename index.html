@@ -1647,6 +1647,7 @@ function switchView(viewName, el) {
   const titles = { visao: "Migração de Torres", regionais: "Regionais e torres", cartas: "Cartas de distrato", finalizados: "Clientes finalizados", lote: "Atualizar em lote", fca: "FCA da semana", resumo: "Resumo executivo", historico: "Histórico de alterações", usuarios: "Usuários e acessos", desmontagem: "Desmontagem de torres", torres: "Torres por cidade" };
   document.getElementById("viewTitle").textContent = titles[viewName];
   if (viewName === "historico") carregarHistorico();
+  if (viewName === "fca") { fcaHist.chave = ""; renderFca(); }
 }
 function switchViewByName(viewName) {
   const el = document.querySelector(`.nav-item[data-view="${viewName}"]`);
@@ -2070,16 +2071,55 @@ function fcaTrocarPeriodo() {
   }
   fcaSujo = false; renderFca();
 }
-function fcaFatos(p) {
+// tipo da migracao, lido do que a pessoa escreveu na observacao (ex.: "migrada para a fibra", "migrado de torre")
+const FCA_TIPOS = [["fibra", "para fibra"], ["radio", "para rádio"], ["torre", "para outra torre"], ["provedor", "para outro provedor"], ["semDetalhe", "sem detalhe na observação"]];
+function fcaTipoMigracao(obs) {
+  const t = String(obs || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (/fibra/.test(t)) return "fibra";
+  if (/radio/.test(t)) return "radio";
+  if (/provedor|embratel|fenix|concorrente|starlink/.test(t)) return "provedor";
+  if (/torre/.test(t)) return "torre";
+  return "semDetalhe";
+}
+const fcaHist = { chave: "", eventos: [], carregando: false, erro: false };   // mudancas de status lidas do Historico no periodo
+async function carregarHistoricoFca(p) {
+  fcaHist.carregando = true;
+  try {
+    const snap = await db.collection("historico").where("quando", ">=", p.ini.toISOString()).where("quando", "<=", p.fim.toISOString()).orderBy("quando").get();
+    fcaHist.eventos = snap.docs.map(d => d.data()); fcaHist.erro = false;
+  } catch (e) { console.error("FCA: nao deu para ler o Historico", e); fcaHist.eventos = []; fcaHist.erro = true; }
+  fcaHist.chave = p.chave; fcaHist.carregando = false;
+  renderFca();
+}
+function fcaFatos(p, hist) {
   const dentro = (d) => !!d && d >= p.ini && d <= p.fim;
   const iso = (s) => { if (!s) return null; const d = new Date(s); return isNaN(d) ? null : d; };
+  const chaveCli = (t, cl) => normalizar(t) + "|" + normalizar(cl);
+  // ultima mudanca de status de cada cliente no periodo, segundo o Historico
+  const ultimo = {};
+  (hist || []).slice().sort((a, b) => String(a.quando).localeCompare(String(b.quando))).forEach(h => {
+    if (h.acao !== "Status alterado") return;
+    ultimo[chaveCli(h.torre, h.cliente)] = { novo: String(h.detalhe || "").split("→").pop().trim(), quando: h.quando };
+  });
+  // o que o Historico registrou de OUTRA acao (observacao, carta...) perto da ultima alteracao do cliente
+  const outras = {};
+  (hist || []).forEach(h => { if (h.acao === "Status alterado" || h.acao === "Data do status registrada (FCA)") return; (outras[chaveCli(h.torre, h.cliente)] = outras[chaveCli(h.torre, h.cliente)] || []).push(h); });
+  const registroDe = (c) => { const base = iso(c.atualizadoEm); let melhor = null, menor = Infinity; (outras[chaveCli(c.torre, c.cliente)] || []).forEach(h => { const d = Math.abs(new Date(h.quando) - base); if (d < menor) { menor = d; melhor = h; } }); return (melhor && menor <= 5 * 60 * 1000) ? melhor.acao : ""; };
+  // data EXATA em que o cliente chegou ao status: a gravada no cliente ou, se nao tem, a do Historico
+  const dataExata = (c, campo, alvo) => { const d = iso(c[campo]); if (d) return d; const u = ultimo[chaveCli(c.torre, c.cliente)]; return (u && u.novo === alvo) ? iso(u.quando) : null; };
+  // sem data exata: vale a data da ultima alteracao (a mesma regra do Resumo), a menos que a pessoa tenha tirado o cliente da semana
+  const dataDoStatus = (c, campo, alvo) => {
+    const ex = dataExata(c, campo, alvo);
+    if (ex) return { c: c, quando: ex, aprox: false, registro: "" };
+    return { c: c, quando: c.fcaIgnorar ? null : iso(c.atualizadoEm), aprox: true, registro: registroDe(c) };
+  };
   const enviadas = data.filter(c => c.cartaEnviada && dentro(parseDataBR(c.dataEnvioCarta)))
     .sort((a, b) => parseDataBR(a.dataEnvioCarta) - parseDataBR(b.dataEnvioCarta));
   const situacao = (c) => c.status === ST_CANC ? "cancelaram" : c.status === "Concluído" ? "migraram" : c.status === ST_SERA ? (prazoCarta(c).vencido ? "vencidos" : "noPrazo") : "outros";
   const funil = { cancelaram: 0, migraram: 0, noPrazo: 0, vencidos: 0, outros: 0 };
   enviadas.forEach(c => { funil[situacao(c)]++; });
-  const canceladosSemana = data.filter(c => c.status === ST_CANC && dentro(iso(c.canceladoEm))).sort((a, b) => new Date(a.canceladoEm) - new Date(b.canceladoEm));
-  const migracoes = data.filter(c => c.status === "Concluído" && dentro(iso(c.concluidoEm))).sort((a, b) => new Date(a.concluidoEm) - new Date(b.concluidoEm));
+  const canceladosSemana = data.filter(c => c.status === ST_CANC).map(c => dataDoStatus(c, "canceladoEm", ST_CANC)).filter(x => dentro(x.quando)).sort((a, b) => a.quando - b.quando);
+  const migracoes = data.filter(c => c.status === "Concluído").map(c => dataDoStatus(c, "concluidoEm", "Concluído")).filter(x => dentro(x.quando)).sort((a, b) => a.quando - b.quando);
   const emAndamentoLista = data.filter(c => c.status === "Em andamento").sort((a, b) => a.regional.localeCompare(b.regional, "pt-BR") || a.torre.localeCompare(b.torre) || a.cliente.localeCompare(b.cliente, "pt-BR"));
   const desmontadas = [...new Set(data.filter(c => c.torreDesmontada && dentro(parseDataBR(c.dataDesmontagem))).map(c => c.torre))]
     .map(t => ({ torre: t, regional: (data.find(c => c.torre === t) || {}).regional || "", data: dataDesmontagemTorre(t) }));
@@ -2089,8 +2129,8 @@ function fcaFatos(p) {
     regional: r,
     enviadas: enviadas.filter(c => c.regional === r).length,
     cancelaram: enviadas.filter(c => c.regional === r && c.status === ST_CANC).length,
-    canceladosSemana: canceladosSemana.filter(c => c.regional === r).length,
-    migracoes: migracoes.filter(c => c.regional === r).length,
+    canceladosSemana: canceladosSemana.filter(x => x.c.regional === r).length,
+    migracoes: migracoes.filter(x => x.c.regional === r).length,
     emAndamento: emAndamentoLista.filter(c => c.regional === r).length,
     vencidos: data.filter(c => c.regional === r && c.cartaEnviada && c.status === ST_SERA && prazoCarta(c).vencido).length,
   })).filter(r => r.enviadas || r.canceladosSemana || r.migracoes);
@@ -2105,8 +2145,13 @@ function fcaFatos(p) {
   };
   const totais = { migrados: data.filter(c => c.status === "Concluído").length, serao: sera.length, cancelados: data.filter(c => c.status === ST_CANC).length,
     prontas: [...new Set(data.map(c => c.torre))].filter(t => torreProntaParaDesmontar(t)).length };
-  const semDataFim = data.filter(c => (c.status === ST_CANC && !c.canceladoEm) || (c.status === "Concluído" && !c.concluidoEm)).length;
-  return { enviadas, funil, canceladosSemana, migracoes, emAndamentoLista, desmontadas, porRegional, agora, totais, semDataFim, situacao, migPorReg: contaReg(migracoes), canPorReg: contaReg(canceladosSemana) };
+  const semDataFim = data.filter(c => (c.status === ST_CANC && !dataExata(c, "canceladoEm", ST_CANC)) || (c.status === "Concluído" && !dataExata(c, "concluidoEm", "Concluído"))).length;
+  // contados pela data da ultima alteracao (sem a data exata do status): a pessoa confere, fixa a data ou tira da semana
+  const possiveis = migracoes.concat(canceladosSemana).filter(x => x.aprox).sort((a, b) => a.quando - b.quando);
+  const tiposMig = {}; migracoes.forEach(x => { const k = fcaTipoMigracao(x.c.obs); tiposMig[k] = (tiposMig[k] || 0) + 1; });
+  return { enviadas, funil, canceladosSemana, migracoes, emAndamentoLista, desmontadas, porRegional, agora, totais, semDataFim, possiveis, situacao, tiposMig,
+    migPorReg: contaReg(migracoes.map(x => x.c)), canPorReg: contaReg(canceladosSemana.map(x => x.c)),
+    aproxMig: migracoes.filter(x => x.aprox).length, aproxCan: canceladosSemana.filter(x => x.aprox).length };
 }
 // o Fato em quatro blocos: cartas, migracoes, cancelamentos e torres
 function fcaTextoFato(p, f) {
@@ -2126,7 +2171,9 @@ function fcaTextoFato(p, f) {
   }
   // migracoes
   const m = f.migracoes.length;
-  linhas.push({ rot: "Migrações", txt: (m ? `${pl(m, "migração foi concluída", "migrações foram concluídas")} na semana (${porReg(f.migPorReg)}).` : "Nenhuma migração foi concluída na semana.") +
+  const tipos = FCA_TIPOS.filter(([k]) => f.tiposMig[k]).map(([k, rot]) => `${f.tiposMig[k]} ${rot}`);
+  const frasePorTipo = (tipos.length && f.tiposMig.semDetalhe !== m) ? ` Por tipo: ${tipos.length > 1 ? tipos.slice(0, -1).join(", ") + " e " + tipos[tipos.length - 1] : tipos[0]}.` : "";
+  linhas.push({ rot: "Migrações", txt: (m ? `${pl(m, "migração foi concluída", "migrações foram concluídas")} na semana (${porReg(f.migPorReg)}).${frasePorTipo}` : "Nenhuma migração foi concluída na semana.") +
     ` ${f.agora.emAndamento === 0 ? "Nenhum cliente está" : f.agora.emAndamento === 1 ? "1 cliente está" : `${f.agora.emAndamento} clientes estão`} com a migração em andamento, e ${pl(f.totais.migrados, "cliente já migrou", "clientes já migraram")} no total.` });
   // cancelamentos
   const k = f.canceladosSemana.length, s = f.totais.serao;
@@ -2147,15 +2194,52 @@ function fcaTabela(titulo, linhas, cols, aberto) {
 }
 function fcaListas(f) {
   const rotSit = (c) => c.status === ST_CANC ? "Cancelado" : c.status === "Concluído" ? "Migrou" : c.status === ST_SERA ? (prazoCarta(c).vencido ? "30 dias vencidos" : "No prazo") : c.status;
-  const dBR = (s) => s ? new Date(s).toLocaleDateString("pt-BR") : "—";
+  const dBR = (d, aprox) => d ? (aprox ? "~" : "") + d.toLocaleDateString("pt-BR") : "—";
   const curto = (s) => { s = (s || "").trim(); return s.length > 90 ? s.slice(0, 90) + "…" : s || "—"; };
   return {
     enviadas: { titulo: "Cartas enviadas", cols: ["Cliente", "Torre", "Regional", "Carta enviada em", "Situação hoje"], linhas: f.enviadas.map(c => [c.cliente, c.torre, c.regional, c.dataEnvioCarta, rotSit(c)]) },
-    migracoes: { titulo: "Migrações concluídas na semana", cols: ["Cliente", "Torre", "Regional", "Concluído em"], linhas: f.migracoes.map(c => [c.cliente, c.torre, c.regional, dBR(c.concluidoEm)]) },
+    migracoes: { titulo: "Migrações concluídas na semana", cols: ["Cliente", "Torre", "Regional", "Concluído em", "Tipo"], linhas: f.migracoes.map(x => [x.c.cliente, x.c.torre, x.c.regional, dBR(x.quando, x.aprox), (FCA_TIPOS.find(t => t[0] === fcaTipoMigracao(x.c.obs)) || [0, "—"])[1].replace("sem detalhe na observação", "sem detalhe")]) },
     andamento: { titulo: "Migrações em andamento (hoje)", cols: ["Cliente", "Torre", "Regional", "Observação"], linhas: f.emAndamentoLista.map(c => [c.cliente, c.torre, c.regional, curto(c.obs)]) },
-    cancelados: { titulo: "Clientes cancelados na semana", cols: ["Cliente", "Torre", "Regional", "Cancelado em"], linhas: f.canceladosSemana.map(c => [c.cliente, c.torre, c.regional, dBR(c.canceladoEm)]) },
+    cancelados: { titulo: "Clientes cancelados na semana", cols: ["Cliente", "Torre", "Regional", "Cancelado em"], linhas: f.canceladosSemana.map(x => [x.c.cliente, x.c.torre, x.c.regional, dBR(x.quando, x.aprox)]) },
     desmontadas: { titulo: "Torres desmontadas na semana", cols: ["Torre", "Regional", "Desmontada em"], linhas: f.desmontadas.map(t => [t.torre, t.regional, t.data]) },
   };
+}
+// quem mudou na semana mas ficou sem a data do status: a pessoa confere e manda contar na semana
+function fcaDataDoStatus(c, registrar) {
+  const d = c.atualizadoEm;
+  if (c.status === ST_CANC) c.canceladoEm = d; else if (c.status === "Concluído") c.concluidoEm = d;
+  if (registrar) registrarHistorico("Data do status registrada (FCA)", `${c.status} em ${new Date(d).toLocaleDateString("pt-BR")}`, c.torre, c.cliente);
+}
+function fcaFixar(id) {       // grava a data da ultima alteracao como a data do status: o numero da semana nao muda mais
+  if (!exigirEdicao()) return;
+  const c = data.find(x => x.id === id); if (!c) return;
+  fcaDataDoStatus(c, true);
+  saveData(); renderAll();
+}
+function fcaTirar(id) {        // este cliente nao mudou de status nesta semana: sai da contagem
+  if (!exigirEdicao()) return;
+  const c = data.find(x => x.id === id); if (!c) return;
+  c.fcaIgnorar = true;
+  registrarHistorico("Fora do FCA da semana", `${c.status}: nao mudou de status nesse periodo`, c.torre, c.cliente);
+  saveData(); renderAll();
+}
+function fcaFixarTodos() {
+  if (!exigirEdicao()) return;
+  const p = fcaPeriodo(), f = fcaFatos(p, fcaHist.chave === p.chave ? fcaHist.eventos : []);
+  const lista = f.possiveis.map(x => x.c);
+  if (!lista.length) return;
+  if (!window.confirm(`Fixar a data de ${lista.length} cliente(s)?\n\nCada um passa a valer como Cancelado ou Concluído na data da última alteração dele, e o número desta semana não muda mais.`)) return;
+  lista.forEach(c => fcaDataDoStatus(c, true));
+  saveData(); renderAll();
+}
+function fcaTirarObsCarta() {
+  if (!exigirEdicao()) return;
+  const p = fcaPeriodo(), f = fcaFatos(p, fcaHist.chave === p.chave ? fcaHist.eventos : []);
+  const lista = f.possiveis.filter(x => x.registro).map(x => x.c);
+  if (!lista.length) return;
+  if (!window.confirm(`Tirar ${lista.length} cliente(s) da contagem desta semana?\n\nSão os que o Histórico mostra como observação ou carta junto da última alteração, ou seja, é provável que o status não tenha mudado agora.`)) return;
+  lista.forEach(c => { c.fcaIgnorar = true; registrarHistorico("Fora do FCA da semana", `${c.status}: so observacao ou carta nesse periodo`, c.torre, c.cliente); });
+  saveData(); renderAll();
 }
 function renderFcaTextos(forcar) {
   const p = fcaPeriodo();
@@ -2179,7 +2263,9 @@ function fcaTabelaRegional(f, pdf) {
 function renderFca() {
   const cont = document.getElementById("fcaConteudo");
   if (!cont) return;
-  const p = fcaPeriodo(), f = fcaFatos(p), fu = f.funil, L = fcaListas(f);
+  const p = fcaPeriodo();
+  if (fcaHist.chave !== p.chave && !fcaHist.carregando) carregarHistoricoFca(p);   // assincrono: redesenha quando chegar
+  const f = fcaFatos(p, fcaHist.chave === p.chave ? fcaHist.eventos : []), fu = f.funil, L = fcaListas(f);
   const card = (cls, rot, n) => `<div class="metric-card ${cls}"><div class="label">${rot}</div><div class="num">${n}</div></div>`;
   let html = `<div class="card-grid" style="margin-bottom:14px;">
     ${card("c-red", "Cartas enviadas", f.enviadas.length)}${card("c-dark", "Dessas, cancelaram", fu.cancelaram)}${card("c-teal", "Migrações concluídas", f.migracoes.length)}${card("c-amber", "Cancelados na semana", f.canceladosSemana.length)}${card("c-blue", "Torres desmontadas", f.desmontadas.length)}
@@ -2187,8 +2273,28 @@ function renderFca() {
   html += `<div class="list-card" style="margin-bottom:14px;" id="fcaFatoBox">
     <div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:8px;">Fato</div>
     <div id="fcaFatoTexto" style="font-size:14px; line-height:1.55;">${fcaTextoFato(p, f).map(l => `<p style="margin:0 0 8px 0;"><strong>${l.rot}:</strong> ${esc(l.txt)}</p>`).join("")}</div>
-    ${f.semDataFim ? `<div style="font-size:11px; color:var(--amber-text); margin-top:6px;">${f.semDataFim} cliente(s) já estão Cancelado ou Concluído sem data registrada (mudaram antes do FCA existir), por isso não entram em "cancelados na semana" nem em "migrações concluídas" da semana.</div>` : ""}
+    ${fcaHist.carregando && fcaHist.chave !== p.chave ? `<div style="font-size:11px; color:var(--grey); margin-top:6px;">Conferindo o Histórico para achar as datas das mudanças...</div>` : ""}
+    ${fcaHist.erro ? `<div style="font-size:11px; color:var(--red-text); margin-top:6px;">Não foi possível ler o Histórico. Os números usam só as datas gravadas nos clientes.</div>` : ""}
+    ${(f.aproxMig + f.aproxCan) ? `<div style="font-size:11px; color:var(--amber-text); margin-top:6px;">${f.aproxMig} migração(ões) e ${f.aproxCan} cancelamento(s) foram contados pela data da última alteração do cliente (sem a data exata do status). Confira a caixa abaixo.</div>` : ""}
   </div>`;
+  if (f.possiveis.length) {
+    const th = "padding:7px 10px; color:white; font-size:11px; text-align:left;";
+    const comReg = f.possiveis.filter(x => x.registro).length;
+    const curto = (s) => { s = (s || "").trim(); return s.length > 70 ? s.slice(0, 70) + "…" : s || "—"; };
+    html += `<div class="list-card" style="margin-bottom:14px; border-left:4px solid var(--amber-text);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div><strong>${f.possiveis.length} cliente(s) contados pela data da última alteração, sem a data exata do status</strong>
+          <div style="font-size:12px; color:var(--grey); margin-top:2px;">É a mesma regra da aba Resumo ("Última semana"). Se algum só teve observação ou carta, <strong>tire da semana</strong>. <strong>Fixar</strong> grava a data da última alteração como a do status, e o número desta semana não muda mais.</div></div>
+        <div class="acoes-edicao" style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn-small" onclick="fcaTirarObsCarta()" ${comReg ? "" : "disabled"}>Tirar os de observação ou carta (${comReg})</button>
+          <button class="btn-small" onclick="fcaFixarTodos()">Fixar todos (${f.possiveis.length})</button>
+        </div>
+      </div>
+      <div style="max-height:420px; overflow-y:auto; margin-top:10px;">
+      <table style="width:100%; border-collapse:collapse; font-size:13px;"><tr style="background:var(--blue-dark); position:sticky; top:0;"><th style="${th}">Cliente</th><th style="${th}">Torre · Regional</th><th style="${th}">Status</th><th style="${th}">Observação</th><th style="${th}">Última alteração</th><th style="${th}">Histórico</th><th class="acoes-edicao" style="${th}"></th></tr>
+      ${f.possiveis.map((x, i) => { const c = x.c; return `<tr style="background:${i % 2 === 0 ? "var(--grey-light)" : "white"};"><td style="padding:7px 10px; font-weight:600;">${esc(c.cliente)}</td><td style="padding:7px 10px;">${esc(c.torre)} · ${esc(c.regional)}</td><td style="padding:7px 10px;">${c.status === ST_CANC ? "Cancelado" : "Concluído"}</td><td style="padding:7px 10px; font-size:12px;">${esc(curto(c.obs))}</td><td style="padding:7px 10px; white-space:nowrap;">${fmtDataHora(c.atualizadoEm)}</td><td style="padding:7px 10px; font-size:12px; color:${x.registro ? "var(--amber-text)" : "var(--grey)"};">${x.registro ? "foi: " + esc(x.registro.toLowerCase()) : "sem registro"}</td><td class="acoes-edicao" style="padding:7px 10px; text-align:right; white-space:nowrap;"><button class="btn-small" onclick="fcaFixar(${c.id})">Fixar</button> <button class="btn-small" onclick="fcaTirar(${c.id})">Tirar</button></td></tr>`; }).join("")}</table></div>
+    </div>`;
+  }
   if (f.porRegional.length) html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:6px;">Por regional</div>${fcaTabelaRegional(f, false)}</div>`;
   html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:4px;">Quem são</div>
     ${[L.enviadas, L.migracoes, L.andamento, L.cancelados, L.desmontadas].map(x => fcaTabela(x.titulo, x.linhas, x.cols, false)).join("")}</div>`;
@@ -2213,7 +2319,7 @@ function salvarFca() {
 function abrirFcaPdf() {
   document.getElementById("pdfModalTitle").innerHTML = "<strong>FCA da semana</strong>";
   document.getElementById("periodoSeletor").style.display = "none";
-  const p = fcaPeriodo(), f = fcaFatos(p), fu = f.funil, L = fcaListas(f);
+  const p = fcaPeriodo(), f = fcaFatos(p, fcaHist.chave === p.chave ? fcaHist.eventos : []), fu = f.funil, L = fcaListas(f);
   const causa = document.getElementById("fcaCausa").value.trim(), acao = document.getElementById("fcaAcao").value.trim();   // o que esta na tela, salvo ou nao
   const th = "padding:6px 8px; color:white; font-size:10px; text-align:left;";
   const caixa = (rot, n, cor) => `<td style="padding:8px 6px; border:1px solid #C5CAD8; text-align:center; width:20%;"><div style="font-size:9px; color:var(--grey); font-weight:700; text-transform:uppercase;">${rot}</div><div style="font-size:19px; font-weight:700; color:${cor};">${n}</div></td>`;
@@ -2231,6 +2337,7 @@ function abrirFcaPdf() {
     <table style="width:100%; border-collapse:collapse; margin-bottom:6px;"><tr>${caixa("Cartas enviadas", f.enviadas.length, "#B00020")}${caixa("Dessas, cancelaram", fu.cancelaram, "#7A1F1F")}${caixa("Migrações concluídas", f.migracoes.length, "#0E8A78")}${caixa("Cancelados na semana", f.canceladosSemana.length, "#B45309")}${caixa("Torres desmontadas", f.desmontadas.length, "#1A3FBF")}</tr></table>
     <h3 style="margin:14px 0 4px 0; color:var(--blue-dark); font-size:14px;">Fato</h3>
     <div style="font-size:12px; line-height:1.55;">${fcaTextoFato(p, f).map(l => `<p style="margin:0 0 6px 0;"><strong>${l.rot}:</strong> ${esc(l.txt)}</p>`).join("")}</div>
+    ${(f.aproxMig + f.aproxCan) ? `<div style="font-size:10px; color:var(--grey); margin-top:4px;">${f.aproxMig} migração(ões) e ${f.aproxCan} cancelamento(s) contados pela data da última alteração do cliente; no anexo, essas datas aparecem com "~".</div>` : ""}
     ${fcaTabelaRegional(f, true)}
     ${bloco("Causa", causa)}
     ${bloco("Ação", acao)}
@@ -2575,13 +2682,7 @@ function renderConsulta() {
   // que podem ter status "Concluído" mas NAO vao ser desmontadas de fato
   const torresMap = {};
   data.forEach(d => { torresMap[d.torre] = torresMap[d.torre] || []; torresMap[d.torre].push(d.status); });
-  const torresProntasSet = new Set(
-    Object.entries(torresMap)
-      .filter(([t, sts]) => sts.every(s => s === "Concluído"))
-      .filter(([t]) => !TORRES_MANTIDAS_ATIVAS.includes(t) && !TORRES_PARTICULARES.includes(t))
-      .filter(([t]) => !torreEstaDesmontada(t))
-      .map(([t]) => t)
-  );
+  const torresProntasSet = new Set(Object.keys(torresMap).filter(t => torreProntaParaDesmontar(t)));
 
   // Torres ja desmontadas (marcadas no painel)
   const torresDesmontadasSet = new Set(Object.keys(torresMap).filter(t => torreEstaDesmontada(t)));
