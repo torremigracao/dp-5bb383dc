@@ -2080,40 +2080,66 @@ function fcaFatos(p) {
   enviadas.forEach(c => { funil[situacao(c)]++; });
   const canceladosSemana = data.filter(c => c.status === ST_CANC && dentro(iso(c.canceladoEm))).sort((a, b) => new Date(a.canceladoEm) - new Date(b.canceladoEm));
   const migracoes = data.filter(c => c.status === "Concluído" && dentro(iso(c.concluidoEm))).sort((a, b) => new Date(a.concluidoEm) - new Date(b.concluidoEm));
+  const emAndamentoLista = data.filter(c => c.status === "Em andamento").sort((a, b) => a.regional.localeCompare(b.regional, "pt-BR") || a.torre.localeCompare(b.torre) || a.cliente.localeCompare(b.cliente, "pt-BR"));
   const desmontadas = [...new Set(data.filter(c => c.torreDesmontada && dentro(parseDataBR(c.dataDesmontagem))).map(c => c.torre))]
     .map(t => ({ torre: t, regional: (data.find(c => c.torre === t) || {}).regional || "", data: dataDesmontagemTorre(t) }));
-  const regs = [...new Set(enviadas.map(c => c.regional))].sort((a, b) => a.localeCompare(b, "pt-BR"));
-  const porRegional = regs.map(r => { const l = enviadas.filter(c => c.regional === r); const f = { enviadas: l.length, cancelaram: 0, migraram: 0, noPrazo: 0, vencidos: 0, outros: 0 }; l.forEach(c => { f[situacao(c)]++; }); return Object.assign({ regional: r }, f); });
+  const contaReg = (lista) => { const m = {}; lista.forEach(c => { m[c.regional] = (m[c.regional] || 0) + 1; }); return m; };
+  const regs = [...new Set(data.map(c => c.regional))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const porRegional = regs.map(r => ({
+    regional: r,
+    enviadas: enviadas.filter(c => c.regional === r).length,
+    cancelaram: enviadas.filter(c => c.regional === r && c.status === ST_CANC).length,
+    canceladosSemana: canceladosSemana.filter(c => c.regional === r).length,
+    migracoes: migracoes.filter(c => c.regional === r).length,
+    emAndamento: emAndamentoLista.filter(c => c.regional === r).length,
+    vencidos: data.filter(c => c.regional === r && c.cartaEnviada && c.status === ST_SERA && prazoCarta(c).vencido).length,
+  })).filter(r => r.enviadas || r.canceladosSemana || r.migracoes);
+  const sera = data.filter(c => c.status === ST_SERA);
   const agora = {
     aEnviar: data.filter(c => ehCancelamento(c.status) && !c.cartaEnviada).length,
     vencidos: data.filter(c => c.cartaEnviada && c.status === ST_SERA && prazoCarta(c).vencido).length,
-    emAndamento: data.filter(c => c.status === "Em andamento").length,
+    emAndamento: emAndamentoLista.length,
+    seraAEnviar: sera.filter(c => !c.cartaEnviada).length,
+    seraNoPrazo: sera.filter(c => c.cartaEnviada && !prazoCarta(c).vencido && !prazoCarta(c).semData).length,
+    seraVencidos: sera.filter(c => c.cartaEnviada && prazoCarta(c).vencido).length,
   };
+  const totais = { migrados: data.filter(c => c.status === "Concluído").length, serao: sera.length, cancelados: data.filter(c => c.status === ST_CANC).length,
+    prontas: [...new Set(data.map(c => c.torre))].filter(t => torreProntaParaDesmontar(t)).length };
   const semDataFim = data.filter(c => (c.status === ST_CANC && !c.canceladoEm) || (c.status === "Concluído" && !c.concluidoEm)).length;
-  return { enviadas, funil, canceladosSemana, migracoes, desmontadas, porRegional, agora, semDataFim, situacao };
+  return { enviadas, funil, canceladosSemana, migracoes, emAndamentoLista, desmontadas, porRegional, agora, totais, semDataFim, situacao, migPorReg: contaReg(migracoes), canPorReg: contaReg(canceladosSemana) };
 }
+// o Fato em quatro blocos: cartas, migracoes, cancelamentos e torres
 function fcaTextoFato(p, f) {
-  const n = f.enviadas.length, pl = (k, s, pp) => `${k} ${k === 1 ? s : pp}`;
-  const partes = [];
-  if (n === 0) partes.push(`Na semana de ${p.rotulo} nenhuma carta de cancelamento foi enviada.`);
+  const pl = (k, s, pp) => `${k} ${k === 1 ? s : pp}`;
+  const porReg = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "pt-BR")).map(([r, n]) => `${r} ${n}`).join(", ");
+  const n = f.enviadas.length, fu = f.funil, linhas = [];
+  // cartas
+  if (n === 0) linhas.push({ rot: "Cartas", txt: `Na semana de ${p.rotulo} nenhuma carta de cancelamento foi enviada.` });
   else {
-    const fu = f.funil, det = [];
+    const det = [];
     if (fu.cancelaram) det.push(pl(fu.cancelaram, "cliente cancelou", "clientes cancelaram"));
     if (fu.migraram) det.push(pl(fu.migraram, "migrou", "migraram"));
     if (fu.noPrazo) det.push(`${pl(fu.noPrazo, "aguarda", "aguardam")} dentro do prazo de ${PRAZO_CARTA_DIAS} dias`);
     if (fu.vencidos) det.push(`${pl(fu.vencidos, "já passou", "já passaram")} dos ${PRAZO_CARTA_DIAS} dias`);
     if (fu.outros) det.push(`${pl(fu.outros, "segue", "seguem")} em outra situação`);
-    partes.push(`Na semana de ${p.rotulo} ${n === 1 ? "foi enviada 1 carta" : `foram enviadas ${n} cartas`} de cancelamento` + (det.length ? `. ${n === 1 ? "Dessa" : "Dessas"}, ${det.join(", ")}.` : "."));
+    linhas.push({ rot: "Cartas", txt: `Na semana de ${p.rotulo} ${n === 1 ? "foi enviada 1 carta" : `foram enviadas ${n} cartas`} de cancelamento` + (det.length ? `. ${n === 1 ? "Dessa" : "Dessas"}, ${det.join(", ")}.` : ".") });
   }
-  const extra = [];
-  if (f.canceladosSemana.length) extra.push(pl(f.canceladosSemana.length, "cliente foi cancelado", "clientes foram cancelados"));
-  if (f.migracoes.length) extra.push(pl(f.migracoes.length, "migração concluída", "migrações concluídas"));
-  if (f.desmontadas.length) extra.push(pl(f.desmontadas.length, "torre desmontada", "torres desmontadas"));
-  if (extra.length) partes.push(`Na semana também houve: ${extra.join("; ")}.`);
-  return partes.join(" ");
+  // migracoes
+  const m = f.migracoes.length;
+  linhas.push({ rot: "Migrações", txt: (m ? `${pl(m, "migração foi concluída", "migrações foram concluídas")} na semana (${porReg(f.migPorReg)}).` : "Nenhuma migração foi concluída na semana.") +
+    ` ${f.agora.emAndamento === 0 ? "Nenhum cliente está" : f.agora.emAndamento === 1 ? "1 cliente está" : `${f.agora.emAndamento} clientes estão`} com a migração em andamento, e ${pl(f.totais.migrados, "cliente já migrou", "clientes já migraram")} no total.` });
+  // cancelamentos
+  const k = f.canceladosSemana.length, s = f.totais.serao;
+  linhas.push({ rot: "Cancelamentos", txt: (k ? `${pl(k, "cliente foi cancelado", "clientes foram cancelados")} na semana (${porReg(f.canPorReg)}).` : "Nenhum cliente foi cancelado na semana.") +
+    (s ? ` Ainda ${s === 1 ? "há 1 cliente que será cancelado" : `há ${s} clientes que serão cancelados`}: ${f.agora.seraAEnviar} com a carta a enviar, ${f.agora.seraNoPrazo} dentro do prazo e ${f.agora.seraVencidos} com os ${PRAZO_CARTA_DIAS} dias vencidos.` : " Não há clientes aguardando cancelamento.") });
+  // torres
+  const t = f.desmontadas.length, nomes = f.desmontadas.map(x => x.torre);
+  linhas.push({ rot: "Torres", txt: (t ? `${pl(t, "torre foi desmontada", "torres foram desmontadas")} na semana (${nomes.slice(0, 6).join(", ")}${nomes.length > 6 ? ` e mais ${nomes.length - 6}` : ""}).` : "Nenhuma torre foi desmontada na semana.") +
+    (f.totais.prontas ? ` ${pl(f.totais.prontas, "torre está pronta", "torres estão prontas")} para desmontar.` : " Nenhuma torre está pronta para desmontar.") });
+  return linhas;
 }
 function fcaTabela(titulo, linhas, cols, aberto) {
-  if (!linhas.length) return `<div style="font-size:13px; color:var(--grey); margin:6px 0;">${esc(titulo)}: nenhum na semana.</div>`;
+  if (!linhas.length) return `<div style="font-size:13px; color:var(--grey); margin:6px 0;">${esc(titulo)}: nada neste período.</div>`;
   const th = "padding:7px 10px; color:white; font-size:11px; text-align:left;";
   return `<details ${aberto ? "open" : ""} style="margin:8px 0;"><summary style="cursor:pointer; font-size:13px; font-weight:700; color:var(--blue-dark);">${esc(titulo)} (${linhas.length})</summary>
     <table style="width:100%; border-collapse:collapse; font-size:13px; margin-top:6px;"><tr style="background:var(--blue-dark);">${cols.map(c => `<th style="${th}">${esc(c)}</th>`).join("")}</tr>
@@ -2122,10 +2148,12 @@ function fcaTabela(titulo, linhas, cols, aberto) {
 function fcaListas(f) {
   const rotSit = (c) => c.status === ST_CANC ? "Cancelado" : c.status === "Concluído" ? "Migrou" : c.status === ST_SERA ? (prazoCarta(c).vencido ? "30 dias vencidos" : "No prazo") : c.status;
   const dBR = (s) => s ? new Date(s).toLocaleDateString("pt-BR") : "—";
+  const curto = (s) => { s = (s || "").trim(); return s.length > 90 ? s.slice(0, 90) + "…" : s || "—"; };
   return {
     enviadas: { titulo: "Cartas enviadas", cols: ["Cliente", "Torre", "Regional", "Carta enviada em", "Situação hoje"], linhas: f.enviadas.map(c => [c.cliente, c.torre, c.regional, c.dataEnvioCarta, rotSit(c)]) },
-    cancelados: { titulo: "Clientes cancelados na semana", cols: ["Cliente", "Torre", "Regional", "Cancelado em"], linhas: f.canceladosSemana.map(c => [c.cliente, c.torre, c.regional, dBR(c.canceladoEm)]) },
     migracoes: { titulo: "Migrações concluídas na semana", cols: ["Cliente", "Torre", "Regional", "Concluído em"], linhas: f.migracoes.map(c => [c.cliente, c.torre, c.regional, dBR(c.concluidoEm)]) },
+    andamento: { titulo: "Migrações em andamento (hoje)", cols: ["Cliente", "Torre", "Regional", "Observação"], linhas: f.emAndamentoLista.map(c => [c.cliente, c.torre, c.regional, curto(c.obs)]) },
+    cancelados: { titulo: "Clientes cancelados na semana", cols: ["Cliente", "Torre", "Regional", "Cancelado em"], linhas: f.canceladosSemana.map(c => [c.cliente, c.torre, c.regional, dBR(c.canceladoEm)]) },
     desmontadas: { titulo: "Torres desmontadas na semana", cols: ["Torre", "Regional", "Desmontada em"], linhas: f.desmontadas.map(t => [t.torre, t.regional, t.data]) },
   };
 }
@@ -2140,31 +2168,30 @@ function renderFcaTextos(forcar) {
   fcaChaveAtual = p.chave;
   document.getElementById("fcaRegistro").textContent = salvo.em ? `Salvo por ${salvo.por || "—"} em ${new Date(salvo.em).toLocaleString("pt-BR")}` : "Ainda não salvo para este período.";
 }
+function fcaTabelaRegional(f, pdf) {
+  if (!f.porRegional.length) return "";
+  const th = pdf ? "padding:6px 8px; color:white; font-size:10px; text-align:center;" : "padding:7px 10px; color:white; font-size:11px; text-align:center;";
+  const td = pdf ? "padding:5px 8px; text-align:center;" : "padding:7px 10px; text-align:center;";
+  const cab = ["Cartas enviadas", "Cancelaram (das cartas)", "Cancelados na semana", "Migrações concluídas", "Em andamento (hoje)", `${PRAZO_CARTA_DIAS} dias vencidos (hoje)`];
+  return `<table style="width:100%; border-collapse:collapse; font-size:${pdf ? 11 : 13}px;${pdf ? " margin-top:8px;" : ""}"><${pdf ? "thead><tr" : "tr"} style="background:var(--blue-dark);"><th style="${th} text-align:left;">Regional</th>${cab.map(h => `<th style="${th}">${h}</th>`).join("")}</tr>${pdf ? "</thead><tbody>" : ""}
+    ${f.porRegional.map((r, i) => `<tr style="${pdf ? (i % 2 === 1 ? "background:#EEF2FF;" : "") : `background:${i % 2 === 0 ? "var(--grey-light)" : "white"};`}"><td style="${td} text-align:left; font-weight:700;">${esc(r.regional)}</td><td style="${td}">${r.enviadas}</td><td style="${td}">${r.cancelaram}</td><td style="${td}">${r.canceladosSemana}</td><td style="${td}">${r.migracoes}</td><td style="${td}">${r.emAndamento}</td><td style="${td}">${r.vencidos}</td></tr>`).join("")}${pdf ? "</tbody>" : ""}</table>`;
+}
 function renderFca() {
   const cont = document.getElementById("fcaConteudo");
   if (!cont) return;
   const p = fcaPeriodo(), f = fcaFatos(p), fu = f.funil, L = fcaListas(f);
   const card = (cls, rot, n) => `<div class="metric-card ${cls}"><div class="label">${rot}</div><div class="num">${n}</div></div>`;
-  const total = f.enviadas.length;
   let html = `<div class="card-grid" style="margin-bottom:14px;">
-    ${card("c-red", "Cartas enviadas", total)}${card("c-dark", "Dessas, cancelaram", fu.cancelaram)}${card("c-teal", "Migrações concluídas", f.migracoes.length)}${card("c-blue", "Torres desmontadas", f.desmontadas.length)}
+    ${card("c-red", "Cartas enviadas", f.enviadas.length)}${card("c-dark", "Dessas, cancelaram", fu.cancelaram)}${card("c-teal", "Migrações concluídas", f.migracoes.length)}${card("c-amber", "Cancelados na semana", f.canceladosSemana.length)}${card("c-blue", "Torres desmontadas", f.desmontadas.length)}
   </div>`;
-  html += `<div class="list-card" style="margin-bottom:14px;">
-    <div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:6px;">Fato</div>
-    <div id="fcaFatoTexto" style="font-size:14px; line-height:1.55;">${esc(fcaTextoFato(p, f))}</div>
-    <div style="font-size:12px; color:var(--grey); margin-top:10px;">Das ${total} carta(s) enviada(s): <strong>${fu.cancelaram}</strong> cancelaram · <strong>${fu.migraram}</strong> migraram · <strong>${fu.noPrazo}</strong> no prazo · <strong>${fu.vencidos}</strong> com ${PRAZO_CARTA_DIAS} dias vencidos${fu.outros ? ` · <strong>${fu.outros}</strong> em outra situação` : ""}.
-      &nbsp;|&nbsp; Cancelados na semana (qualquer carta): <strong>${f.canceladosSemana.length}</strong>.</div>
-    <div style="font-size:12px; color:var(--grey); margin-top:6px;">Situação agora: <strong>${f.agora.aEnviar}</strong> carta(s) a enviar · <strong>${f.agora.vencidos}</strong> com ${PRAZO_CARTA_DIAS} dias vencidos · <strong>${f.agora.emAndamento}</strong> em andamento.</div>
-    ${f.semDataFim ? `<div style="font-size:11px; color:var(--amber-text); margin-top:6px;">${f.semDataFim} cliente(s) já estão Cancelado ou Concluído sem data registrada (mudaram antes do FCA existir), por isso não entram em "cancelados" nem "migrações" da semana.</div>` : ""}
+  html += `<div class="list-card" style="margin-bottom:14px;" id="fcaFatoBox">
+    <div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:8px;">Fato</div>
+    <div id="fcaFatoTexto" style="font-size:14px; line-height:1.55;">${fcaTextoFato(p, f).map(l => `<p style="margin:0 0 8px 0;"><strong>${l.rot}:</strong> ${esc(l.txt)}</p>`).join("")}</div>
+    ${f.semDataFim ? `<div style="font-size:11px; color:var(--amber-text); margin-top:6px;">${f.semDataFim} cliente(s) já estão Cancelado ou Concluído sem data registrada (mudaram antes do FCA existir), por isso não entram em "cancelados na semana" nem em "migrações concluídas" da semana.</div>` : ""}
   </div>`;
-  if (f.porRegional.length) {
-    const th = "padding:7px 10px; color:white; font-size:11px; text-align:center;";
-    html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:6px;">Cartas enviadas por regional</div>
-      <table style="width:100%; border-collapse:collapse; font-size:13px;"><tr style="background:var(--blue-dark);"><th style="${th} text-align:left;">Regional</th><th style="${th}">Enviadas</th><th style="${th}">Cancelaram</th><th style="${th}">Migraram</th><th style="${th}">No prazo</th><th style="${th}">${PRAZO_CARTA_DIAS} dias vencidos</th></tr>
-      ${f.porRegional.map((r, i) => `<tr style="background:${i % 2 === 0 ? "var(--grey-light)" : "white"};"><td style="padding:7px 10px; font-weight:600;">${esc(r.regional)}</td><td style="padding:7px 10px; text-align:center;">${r.enviadas}</td><td style="padding:7px 10px; text-align:center;">${r.cancelaram}</td><td style="padding:7px 10px; text-align:center;">${r.migraram}</td><td style="padding:7px 10px; text-align:center;">${r.noPrazo}</td><td style="padding:7px 10px; text-align:center;">${r.vencidos}</td></tr>`).join("")}</table></div>`;
-  }
+  if (f.porRegional.length) html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:6px;">Por regional</div>${fcaTabelaRegional(f, false)}</div>`;
   html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:4px;">Quem são</div>
-    ${fcaTabela(L.enviadas.titulo, L.enviadas.linhas, L.enviadas.cols, false)}${fcaTabela(L.cancelados.titulo, L.cancelados.linhas, L.cancelados.cols, false)}${fcaTabela(L.migracoes.titulo, L.migracoes.linhas, L.migracoes.cols, false)}${fcaTabela(L.desmontadas.titulo, L.desmontadas.linhas, L.desmontadas.cols, false)}</div>`;
+    ${[L.enviadas, L.migracoes, L.andamento, L.cancelados, L.desmontadas].map(x => fcaTabela(x.titulo, x.linhas, x.cols, false)).join("")}</div>`;
   cont.innerHTML = html;
   renderFcaTextos(false);
   fcaUltimo = { preset: document.getElementById("fcaPreset").value, de: document.getElementById("fcaDe").value, ate: document.getElementById("fcaAte").value };
@@ -2189,30 +2216,27 @@ function abrirFcaPdf() {
   const p = fcaPeriodo(), f = fcaFatos(p), fu = f.funil, L = fcaListas(f);
   const causa = document.getElementById("fcaCausa").value.trim(), acao = document.getElementById("fcaAcao").value.trim();   // o que esta na tela, salvo ou nao
   const th = "padding:6px 8px; color:white; font-size:10px; text-align:left;";
-  const caixa = (rot, n, cor) => `<td style="padding:8px 10px; border:1px solid #C5CAD8; text-align:center; width:25%;"><div style="font-size:10px; color:var(--grey); font-weight:700; text-transform:uppercase;">${rot}</div><div style="font-size:20px; font-weight:700; color:${cor};">${n}</div></td>`;
+  const caixa = (rot, n, cor) => `<td style="padding:8px 6px; border:1px solid #C5CAD8; text-align:center; width:20%;"><div style="font-size:9px; color:var(--grey); font-weight:700; text-transform:uppercase;">${rot}</div><div style="font-size:19px; font-weight:700; color:${cor};">${n}</div></td>`;
   const anexo = (x) => x.linhas.length ? `<h4 style="margin:14px 0 4px 0; color:var(--blue-dark); font-size:12px;">${esc(x.titulo)} (${x.linhas.length})</h4>
     <table style="width:100%; border-collapse:collapse; font-size:10.5px;"><thead><tr style="background:var(--blue-dark);">${x.cols.map(c => `<th style="${th}">${esc(c)}</th>`).join("")}</tr></thead><tbody>
     ${x.linhas.map((l, i) => `<tr style="${i % 2 === 1 ? "background:#EEF2FF;" : ""}">${l.map((v, k) => `<td style="padding:5px 8px;${k === 0 ? " font-weight:700;" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : "";
   const bloco = (titulo, texto) => `<h3 style="margin:16px 0 4px 0; color:var(--blue-dark); font-size:14px;">${titulo}</h3><div style="font-size:12px; line-height:1.55; white-space:pre-wrap; border:1px solid #C5CAD8; border-radius:6px; padding:8px 10px; min-height:40px;">${texto ? esc(texto) : '<span style="color:var(--grey);">(não preenchido)</span>'}</div>`;
   const logo = document.querySelector("#loginOverlay img").src;
-  const regTab = f.porRegional.length ? `<table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:8px;"><thead><tr style="background:var(--blue-dark);"><th style="${th}">Regional</th><th style="${th} text-align:center;">Enviadas</th><th style="${th} text-align:center;">Cancelaram</th><th style="${th} text-align:center;">Migraram</th><th style="${th} text-align:center;">No prazo</th><th style="${th} text-align:center;">${PRAZO_CARTA_DIAS} dias vencidos</th></tr></thead><tbody>
-    ${f.porRegional.map((r, i) => `<tr style="${i % 2 === 1 ? "background:#EEF2FF;" : ""}"><td style="padding:5px 8px; font-weight:700;">${esc(r.regional)}</td><td style="padding:5px 8px; text-align:center;">${r.enviadas}</td><td style="padding:5px 8px; text-align:center;">${r.cancelaram}</td><td style="padding:5px 8px; text-align:center;">${r.migraram}</td><td style="padding:5px 8px; text-align:center;">${r.noPrazo}</td><td style="padding:5px 8px; text-align:center;">${r.vencidos}</td></tr>`).join("")}</tbody></table>` : "";
+  const anexos = [L.enviadas, L.migracoes, L.andamento, L.cancelados, L.desmontadas].map(anexo).join("");
   document.getElementById("resumoPdfContent").innerHTML = `
     <img class="logo" src="${logo}" alt="UNI Internet">
     <hr class="divider">
     <h2 style="margin-bottom:2px;">FCA da semana — ${esc(p.rotulo)}</h2>
     <p style="font-style:italic; color:var(--grey); margin-top:0; margin-bottom:10px;">Fato, Causa e Ação · Gerado em ${new Date().toLocaleDateString("pt-BR")} por ${esc(nomeUsuario())}</p>
-    <table style="width:100%; border-collapse:collapse; margin-bottom:6px;"><tr>${caixa("Cartas enviadas", f.enviadas.length, "#B00020")}${caixa("Dessas, cancelaram", fu.cancelaram, "#7A1F1F")}${caixa("Migrações concluídas", f.migracoes.length, "#0E8A78")}${caixa("Torres desmontadas", f.desmontadas.length, "#1A3FBF")}</tr></table>
+    <table style="width:100%; border-collapse:collapse; margin-bottom:6px;"><tr>${caixa("Cartas enviadas", f.enviadas.length, "#B00020")}${caixa("Dessas, cancelaram", fu.cancelaram, "#7A1F1F")}${caixa("Migrações concluídas", f.migracoes.length, "#0E8A78")}${caixa("Cancelados na semana", f.canceladosSemana.length, "#B45309")}${caixa("Torres desmontadas", f.desmontadas.length, "#1A3FBF")}</tr></table>
     <h3 style="margin:14px 0 4px 0; color:var(--blue-dark); font-size:14px;">Fato</h3>
-    <div style="font-size:12px; line-height:1.55;">${esc(fcaTextoFato(p, f))}</div>
-    <div style="font-size:11px; color:var(--grey); margin-top:6px;">Das ${f.enviadas.length} carta(s): ${fu.cancelaram} cancelaram · ${fu.migraram} migraram · ${fu.noPrazo} no prazo · ${fu.vencidos} com ${PRAZO_CARTA_DIAS} dias vencidos. Situação agora: ${f.agora.aEnviar} carta(s) a enviar · ${f.agora.vencidos} com ${PRAZO_CARTA_DIAS} dias vencidos · ${f.agora.emAndamento} em andamento.</div>
-    ${regTab}
+    <div style="font-size:12px; line-height:1.55;">${fcaTextoFato(p, f).map(l => `<p style="margin:0 0 6px 0;"><strong>${l.rot}:</strong> ${esc(l.txt)}</p>`).join("")}</div>
+    ${fcaTabelaRegional(f, true)}
     ${bloco("Causa", causa)}
     ${bloco("Ação", acao)}
     <div style="page-break-before:always;"></div>
     <h3 style="margin:0 0 2px 0; color:var(--blue-dark); font-size:14px;">Anexo — quem são</h3>
-    ${anexo(L.enviadas)}${anexo(L.cancelados)}${anexo(L.migracoes)}${anexo(L.desmontadas)}
-    ${(f.enviadas.length + f.canceladosSemana.length + f.migracoes.length + f.desmontadas.length) === 0 ? '<div class="empty-msg">Nada registrado nesta semana.</div>' : ""}
+    ${anexos || '<div class="empty-msg">Nada registrado neste período.</div>'}
     <div class="footer-note">UNI Internet, unindo pessoas, fortalecendo conexões. · Central de Atendimento: 2201-0300</div>`;
   document.getElementById("resumoPdfModal").classList.add("show");
 }
