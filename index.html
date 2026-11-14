@@ -329,6 +329,7 @@
     <div class="nav-item" data-view="desmontagem" onclick="switchView('desmontagem', this)"><span class="dot"></span> Desmontagem</div>
     <div class="nav-item" data-view="lote" id="navLote" onclick="switchView('lote', this)"><span class="dot"></span> Atualizar em lote</div>
     <div class="nav-item" data-view="resumo" onclick="switchView('resumo', this)"><span class="dot"></span> Resumo</div>
+    <div class="nav-item" data-view="fca" onclick="switchView('fca', this)"><span class="dot"></span> FCA da semana</div>
     <div class="nav-item" data-view="historico" onclick="switchView('historico', this)"><span class="dot"></span> Histórico</div>
     <div class="nav-item" data-view="usuarios" id="navUsuarios" style="display:none;" onclick="switchView('usuarios', this)"><span class="dot"></span> Usuários<span class="badge" id="badgeUsuarios" style="display:none;">0</span></div>
 
@@ -518,6 +519,33 @@ Para ADICIONAR um cliente/torre novo, inclua também "regional":
       <div class="list-card">
         <div id="usuariosAviso" style="margin-bottom:10px; font-size:13px;"></div>
         <div style="overflow-x:auto;"><table id="usuariosTabela" style="width:100%; border-collapse:collapse; font-size:13px;"></table></div>
+      </div>
+    </div>
+
+    <div class="view" id="view-fca">
+      <h2 class="section-title">FCA da semana</h2>
+      <p class="section-sub">Fato, Causa e Ação. Os fatos vêm do painel sozinhos; a causa e a ação são escritas por você e ficam salvas para cada período.</p>
+      <div class="controls" style="margin-bottom:14px;">
+        <select id="fcaPreset" onchange="fcaMudouPreset()">
+          <option value="esta">Esta semana</option>
+          <option value="passada">Semana passada</option>
+          <option value="personalizado">Outro período</option>
+        </select>
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:700;">De <input type="date" id="fcaDe" onchange="fcaMudouDatas()" style="padding:8px 10px; border-radius:8px; border:1px solid var(--border); font-size:13px;"></label>
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:700;">Até <input type="date" id="fcaAte" onchange="fcaMudouDatas()" style="padding:8px 10px; border-radius:8px; border:1px solid var(--border); font-size:13px;"></label>
+        <button class="btn-primary" onclick="abrirFcaPdf()">Gerar PDF</button>
+      </div>
+      <div id="fcaConteudo"></div>
+      <div class="list-card" style="margin-bottom:14px;">
+        <div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:6px;">Causa</div>
+        <textarea id="fcaCausa" oninput="fcaSujo = true" rows="4" placeholder="Por que isso aconteceu? Ex.: clientes sem retorno por telefone, endereço desatualizado, concorrente na região..." style="width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px; font-family:inherit; resize:vertical;"></textarea>
+        <div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin:12px 0 6px 0;">Ação</div>
+        <textarea id="fcaAcao" oninput="fcaSujo = true" rows="4" placeholder="O que vai ser feito? Quem faz e até quando?" style="width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px; font-family:inherit; resize:vertical;"></textarea>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:10px;">
+          <button class="btn-primary acoes-edicao" onclick="salvarFca()">Salvar causa e ação</button>
+          <span id="fcaSalvo" style="display:none; color:var(--green-text); font-weight:700; font-size:13px;">Salvo!</span>
+          <span id="fcaRegistro" style="font-size:12px; color:var(--grey);"></span>
+        </div>
       </div>
     </div>
 
@@ -982,6 +1010,13 @@ function normalizarStatus(s) {
   if (["será cancelado", "sera cancelado", "cliente será cancelado", "cliente sera cancelado", "a cancelar"].includes(t)) return ST_SERA;
   return s;
 }
+// guarda a data em que o cliente virou Cancelado ou Concluido (o FCA da semana usa isso)
+function marcarDatasStatus(item, antes, depois) {
+  if (antes === depois) return;
+  const agora = new Date().toISOString();
+  if (depois === ST_CANC) item.canceladoEm = agora; else if (antes === ST_CANC) item.canceladoEm = "";
+  if (depois === "Concluído") item.concluidoEm = agora; else if (antes === "Concluído") item.concluidoEm = "";
+}
 function statusClass(status) { return status === ST_CANC ? "status-CanceladoFinal" : "status-" + status.split(" ")[0].replace("í", "i"); }
 
 // ===== Login, aprovacao de acesso e registro de quem fez cada alteracao =====
@@ -1294,6 +1329,7 @@ function conectarFirestore() {
     esconderAviso();
     if (doc.exists && doc.data().items) {
       data = doc.data().items;
+      fcaDados = doc.data().fca || {};
     } else {
       data = [];
       DOC_REF.set({ items: [], atualizadoEm: new Date().toISOString(), atualizadoPor: usuario ? usuario.email : "" });
@@ -1332,7 +1368,7 @@ async function saveData(showIndicator = true) {
   }
   try {
     salvandoLocalmente = true;
-    await DOC_REF.set({ items: data, atualizadoEm: new Date().toISOString(), atualizadoPor: usuario.email });
+    await DOC_REF.set({ items: data, fca: fcaDados, atualizadoEm: new Date().toISOString(), atualizadoPor: usuario.email });
     if (showIndicator) {
       const ind = document.getElementById("saveIndicator");
       if (ind) { ind.classList.add("show"); setTimeout(() => ind.classList.remove("show"), 1200); }
@@ -1515,6 +1551,7 @@ function updateClient(id, field, value) {
   if (antes === value) return;   // nada mudou (ex.: clicou na caixa e saiu sem editar)
   if (field === "status" && value === ST_CANC && !item.cartaEnviada &&
       !confirm("A carta de cancelamento deste cliente ainda não foi marcada como enviada.\n\nMarcar como Cancelado mesmo assim?\n\n(A torre só fica pronta para desmontar depois que a carta for marcada como enviada.)")) { renderAll(); return; }
+  if (field === "status") marcarDatasStatus(item, item.status, value);
   item[field] = value;
   item.atualizadoEm = new Date().toISOString();
   item.atualizadoPor = nomeUsuario();
@@ -1555,7 +1592,7 @@ async function aplicarLote() {
       (!u.torre || normalizar(d.torre) === normalizar(u.torre))
     );
     if (item) {
-      if (u.status) item.status = u.status;
+      if (u.status) { marcarDatasStatus(item, item.status, u.status); item.status = u.status; }
       if (u.obs !== undefined) item.obs = u.obs;
       if (u.regional && u.regional !== item.regional) { item.regional = u.regional; regionalCorrigida++; }
       item.atualizadoEm = new Date().toISOString();
@@ -1567,7 +1604,7 @@ async function aplicarLote() {
         semRegional.push(u.cliente || "(sem nome)");
         return;
       }
-      data.push({
+      const novo = {
         id: proximoId++,
         cliente: u.cliente,
         torre: u.torre,
@@ -1576,7 +1613,9 @@ async function aplicarLote() {
         obs: u.obs || "",
         atualizadoEm: new Date().toISOString(),
         atualizadoPor: nomeUsuario(),
-      });
+      };
+      marcarDatasStatus(novo, "", novo.status);
+      data.push(novo);
       torresLote.add(u.torre);
       criados++;
     }
@@ -1605,7 +1644,7 @@ function switchView(viewName, el) {
   el.classList.add("active");
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   document.getElementById("view-" + viewName).classList.add("active");
-  const titles = { visao: "Migração de Torres", regionais: "Regionais e torres", cartas: "Cartas de distrato", finalizados: "Clientes finalizados", lote: "Atualizar em lote", resumo: "Resumo executivo", historico: "Histórico de alterações", usuarios: "Usuários e acessos", desmontagem: "Desmontagem de torres", torres: "Torres por cidade" };
+  const titles = { visao: "Migração de Torres", regionais: "Regionais e torres", cartas: "Cartas de distrato", finalizados: "Clientes finalizados", lote: "Atualizar em lote", fca: "FCA da semana", resumo: "Resumo executivo", historico: "Histórico de alterações", usuarios: "Usuários e acessos", desmontagem: "Desmontagem de torres", torres: "Torres por cidade" };
   document.getElementById("viewTitle").textContent = titles[viewName];
   if (viewName === "historico") carregarHistorico();
 }
@@ -1624,6 +1663,7 @@ function renderAll() {
   renderFinalizadosList();
   renderDesmontagem();
   renderTorres();
+  renderFca();
   renderResumo();
 }
 
@@ -1820,6 +1860,7 @@ function cancelarVencidos() {
   const filtrado = !!((document.getElementById("cartasRegional") || {}).value || (document.getElementById("cartasBusca") || {}).value);
   if (!window.confirm(`Marcar ${vencidas.length} cliente(s) como Cancelado?\n\nSão os que já passaram dos ${PRAZO_CARTA_DIAS} dias desde a carta enviada${filtrado ? ", dentro do filtro que está na tela" : ""}.`)) return;
   vencidas.forEach(c => {
+    marcarDatasStatus(c, c.status, ST_CANC);
     c.status = ST_CANC;
     c.atualizadoEm = new Date().toISOString();
     c.atualizadoPor = nomeUsuario();
@@ -1988,6 +2029,192 @@ async function gerarCartasLote() {
   } finally {
     btn.textContent = rotulo; atualizarBarraLote();
   }
+}
+
+// ===== FCA da semana: Fato (automatico), Causa e Acao (escritas por quem edita) =====
+let fcaDados = {};            // { "2026-11-02_2026-11-08": { causa, acao, por, em } }
+let fcaChaveAtual = "";
+let fcaSujo = false;          // ha texto digitado ainda nao salvo
+let fcaUltimo = null;         // ultimo periodo mostrado (para voltar se a pessoa desistir de trocar)
+function isoLocal(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function brDeIso(iso) { const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; }
+function fcaSemana(offset) {   // segunda a domingo; offset 0 = esta semana, -1 = semana passada
+  const h = new Date(); h.setHours(0, 0, 0, 0);
+  const seg = new Date(h); seg.setDate(h.getDate() - ((h.getDay() + 6) % 7) + 7 * offset);
+  const dom = new Date(seg); dom.setDate(seg.getDate() + 6);
+  return [seg, dom];
+}
+function fcaPeriodo() {
+  const de = document.getElementById("fcaDe"), ate = document.getElementById("fcaAte");
+  if (!de.value || !ate.value) { const [a, b] = fcaSemana(0); de.value = isoLocal(a); ate.value = isoLocal(b); }
+  let ini = de.value, fim = ate.value;
+  if (ini > fim) { const t = ini; ini = fim; fim = t; }
+  const [a1, m1, d1] = ini.split("-").map(Number), [a2, m2, d2] = fim.split("-").map(Number);
+  return { iniISO: ini, fimISO: fim, ini: new Date(a1, m1 - 1, d1, 0, 0, 0), fim: new Date(a2, m2 - 1, d2, 23, 59, 59), chave: `${ini}_${fim}`, rotulo: `${brDeIso(ini)} a ${brDeIso(fim)}` };
+}
+function fcaMudouPreset() {
+  const p = document.getElementById("fcaPreset").value;
+  if (p === "esta" || p === "passada") {
+    const [a, b] = fcaSemana(p === "esta" ? 0 : -1);
+    document.getElementById("fcaDe").value = isoLocal(a); document.getElementById("fcaAte").value = isoLocal(b);
+  }
+  fcaTrocarPeriodo();
+}
+function fcaMudouDatas() { document.getElementById("fcaPreset").value = "personalizado"; fcaTrocarPeriodo(); }
+function fcaTrocarPeriodo() {
+  if (fcaSujo && !window.confirm("Você escreveu uma causa ou ação e ainda não salvou. Trocar de período e descartar o texto?")) {
+    if (fcaUltimo) {   // desistiu: volta ao periodo de antes e mantem o que foi digitado
+      document.getElementById("fcaPreset").value = fcaUltimo.preset; document.getElementById("fcaDe").value = fcaUltimo.de; document.getElementById("fcaAte").value = fcaUltimo.ate;
+    }
+    return;
+  }
+  fcaSujo = false; renderFca();
+}
+function fcaFatos(p) {
+  const dentro = (d) => !!d && d >= p.ini && d <= p.fim;
+  const iso = (s) => { if (!s) return null; const d = new Date(s); return isNaN(d) ? null : d; };
+  const enviadas = data.filter(c => c.cartaEnviada && dentro(parseDataBR(c.dataEnvioCarta)))
+    .sort((a, b) => parseDataBR(a.dataEnvioCarta) - parseDataBR(b.dataEnvioCarta));
+  const situacao = (c) => c.status === ST_CANC ? "cancelaram" : c.status === "Concluído" ? "migraram" : c.status === ST_SERA ? (prazoCarta(c).vencido ? "vencidos" : "noPrazo") : "outros";
+  const funil = { cancelaram: 0, migraram: 0, noPrazo: 0, vencidos: 0, outros: 0 };
+  enviadas.forEach(c => { funil[situacao(c)]++; });
+  const canceladosSemana = data.filter(c => c.status === ST_CANC && dentro(iso(c.canceladoEm))).sort((a, b) => new Date(a.canceladoEm) - new Date(b.canceladoEm));
+  const migracoes = data.filter(c => c.status === "Concluído" && dentro(iso(c.concluidoEm))).sort((a, b) => new Date(a.concluidoEm) - new Date(b.concluidoEm));
+  const desmontadas = [...new Set(data.filter(c => c.torreDesmontada && dentro(parseDataBR(c.dataDesmontagem))).map(c => c.torre))]
+    .map(t => ({ torre: t, regional: (data.find(c => c.torre === t) || {}).regional || "", data: dataDesmontagemTorre(t) }));
+  const regs = [...new Set(enviadas.map(c => c.regional))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const porRegional = regs.map(r => { const l = enviadas.filter(c => c.regional === r); const f = { enviadas: l.length, cancelaram: 0, migraram: 0, noPrazo: 0, vencidos: 0, outros: 0 }; l.forEach(c => { f[situacao(c)]++; }); return Object.assign({ regional: r }, f); });
+  const agora = {
+    aEnviar: data.filter(c => ehCancelamento(c.status) && !c.cartaEnviada).length,
+    vencidos: data.filter(c => c.cartaEnviada && c.status === ST_SERA && prazoCarta(c).vencido).length,
+    emAndamento: data.filter(c => c.status === "Em andamento").length,
+  };
+  const semDataFim = data.filter(c => (c.status === ST_CANC && !c.canceladoEm) || (c.status === "Concluído" && !c.concluidoEm)).length;
+  return { enviadas, funil, canceladosSemana, migracoes, desmontadas, porRegional, agora, semDataFim, situacao };
+}
+function fcaTextoFato(p, f) {
+  const n = f.enviadas.length, pl = (k, s, pp) => `${k} ${k === 1 ? s : pp}`;
+  const partes = [];
+  if (n === 0) partes.push(`Na semana de ${p.rotulo} nenhuma carta de cancelamento foi enviada.`);
+  else {
+    const fu = f.funil, det = [];
+    if (fu.cancelaram) det.push(pl(fu.cancelaram, "cliente cancelou", "clientes cancelaram"));
+    if (fu.migraram) det.push(pl(fu.migraram, "migrou", "migraram"));
+    if (fu.noPrazo) det.push(`${pl(fu.noPrazo, "aguarda", "aguardam")} dentro do prazo de ${PRAZO_CARTA_DIAS} dias`);
+    if (fu.vencidos) det.push(`${pl(fu.vencidos, "já passou", "já passaram")} dos ${PRAZO_CARTA_DIAS} dias`);
+    if (fu.outros) det.push(`${pl(fu.outros, "segue", "seguem")} em outra situação`);
+    partes.push(`Na semana de ${p.rotulo} ${n === 1 ? "foi enviada 1 carta" : `foram enviadas ${n} cartas`} de cancelamento` + (det.length ? `. ${n === 1 ? "Dessa" : "Dessas"}, ${det.join(", ")}.` : "."));
+  }
+  const extra = [];
+  if (f.canceladosSemana.length) extra.push(pl(f.canceladosSemana.length, "cliente foi cancelado", "clientes foram cancelados"));
+  if (f.migracoes.length) extra.push(pl(f.migracoes.length, "migração concluída", "migrações concluídas"));
+  if (f.desmontadas.length) extra.push(pl(f.desmontadas.length, "torre desmontada", "torres desmontadas"));
+  if (extra.length) partes.push(`Na semana também houve: ${extra.join("; ")}.`);
+  return partes.join(" ");
+}
+function fcaTabela(titulo, linhas, cols, aberto) {
+  if (!linhas.length) return `<div style="font-size:13px; color:var(--grey); margin:6px 0;">${esc(titulo)}: nenhum na semana.</div>`;
+  const th = "padding:7px 10px; color:white; font-size:11px; text-align:left;";
+  return `<details ${aberto ? "open" : ""} style="margin:8px 0;"><summary style="cursor:pointer; font-size:13px; font-weight:700; color:var(--blue-dark);">${esc(titulo)} (${linhas.length})</summary>
+    <table style="width:100%; border-collapse:collapse; font-size:13px; margin-top:6px;"><tr style="background:var(--blue-dark);">${cols.map(c => `<th style="${th}">${esc(c)}</th>`).join("")}</tr>
+    ${linhas.map((l, i) => `<tr style="background:${i % 2 === 0 ? "var(--grey-light)" : "white"};">${l.map((v, k) => `<td style="padding:7px 10px;${k === 0 ? " font-weight:600;" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</table></details>`;
+}
+function fcaListas(f) {
+  const rotSit = (c) => c.status === ST_CANC ? "Cancelado" : c.status === "Concluído" ? "Migrou" : c.status === ST_SERA ? (prazoCarta(c).vencido ? "30 dias vencidos" : "No prazo") : c.status;
+  const dBR = (s) => s ? new Date(s).toLocaleDateString("pt-BR") : "—";
+  return {
+    enviadas: { titulo: "Cartas enviadas", cols: ["Cliente", "Torre", "Regional", "Carta enviada em", "Situação hoje"], linhas: f.enviadas.map(c => [c.cliente, c.torre, c.regional, c.dataEnvioCarta, rotSit(c)]) },
+    cancelados: { titulo: "Clientes cancelados na semana", cols: ["Cliente", "Torre", "Regional", "Cancelado em"], linhas: f.canceladosSemana.map(c => [c.cliente, c.torre, c.regional, dBR(c.canceladoEm)]) },
+    migracoes: { titulo: "Migrações concluídas na semana", cols: ["Cliente", "Torre", "Regional", "Concluído em"], linhas: f.migracoes.map(c => [c.cliente, c.torre, c.regional, dBR(c.concluidoEm)]) },
+    desmontadas: { titulo: "Torres desmontadas na semana", cols: ["Torre", "Regional", "Desmontada em"], linhas: f.desmontadas.map(t => [t.torre, t.regional, t.data]) },
+  };
+}
+function renderFcaTextos(forcar) {
+  const p = fcaPeriodo();
+  const salvo = fcaDados[p.chave] || {};
+  if (forcar || p.chave !== fcaChaveAtual || !fcaSujo) {
+    document.getElementById("fcaCausa").value = salvo.causa || "";
+    document.getElementById("fcaAcao").value = salvo.acao || "";
+    fcaSujo = false;
+  }
+  fcaChaveAtual = p.chave;
+  document.getElementById("fcaRegistro").textContent = salvo.em ? `Salvo por ${salvo.por || "—"} em ${new Date(salvo.em).toLocaleString("pt-BR")}` : "Ainda não salvo para este período.";
+}
+function renderFca() {
+  const cont = document.getElementById("fcaConteudo");
+  if (!cont) return;
+  const p = fcaPeriodo(), f = fcaFatos(p), fu = f.funil, L = fcaListas(f);
+  const card = (cls, rot, n) => `<div class="metric-card ${cls}"><div class="label">${rot}</div><div class="num">${n}</div></div>`;
+  const total = f.enviadas.length;
+  let html = `<div class="card-grid" style="margin-bottom:14px;">
+    ${card("c-red", "Cartas enviadas", total)}${card("c-dark", "Dessas, cancelaram", fu.cancelaram)}${card("c-teal", "Migrações concluídas", f.migracoes.length)}${card("c-blue", "Torres desmontadas", f.desmontadas.length)}
+  </div>`;
+  html += `<div class="list-card" style="margin-bottom:14px;">
+    <div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:6px;">Fato</div>
+    <div id="fcaFatoTexto" style="font-size:14px; line-height:1.55;">${esc(fcaTextoFato(p, f))}</div>
+    <div style="font-size:12px; color:var(--grey); margin-top:10px;">Das ${total} carta(s) enviada(s): <strong>${fu.cancelaram}</strong> cancelaram · <strong>${fu.migraram}</strong> migraram · <strong>${fu.noPrazo}</strong> no prazo · <strong>${fu.vencidos}</strong> com ${PRAZO_CARTA_DIAS} dias vencidos${fu.outros ? ` · <strong>${fu.outros}</strong> em outra situação` : ""}.
+      &nbsp;|&nbsp; Cancelados na semana (qualquer carta): <strong>${f.canceladosSemana.length}</strong>.</div>
+    <div style="font-size:12px; color:var(--grey); margin-top:6px;">Situação agora: <strong>${f.agora.aEnviar}</strong> carta(s) a enviar · <strong>${f.agora.vencidos}</strong> com ${PRAZO_CARTA_DIAS} dias vencidos · <strong>${f.agora.emAndamento}</strong> em andamento.</div>
+    ${f.semDataFim ? `<div style="font-size:11px; color:var(--amber-text); margin-top:6px;">${f.semDataFim} cliente(s) já estão Cancelado ou Concluído sem data registrada (mudaram antes do FCA existir), por isso não entram em "cancelados" nem "migrações" da semana.</div>` : ""}
+  </div>`;
+  if (f.porRegional.length) {
+    const th = "padding:7px 10px; color:white; font-size:11px; text-align:center;";
+    html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:6px;">Cartas enviadas por regional</div>
+      <table style="width:100%; border-collapse:collapse; font-size:13px;"><tr style="background:var(--blue-dark);"><th style="${th} text-align:left;">Regional</th><th style="${th}">Enviadas</th><th style="${th}">Cancelaram</th><th style="${th}">Migraram</th><th style="${th}">No prazo</th><th style="${th}">${PRAZO_CARTA_DIAS} dias vencidos</th></tr>
+      ${f.porRegional.map((r, i) => `<tr style="background:${i % 2 === 0 ? "var(--grey-light)" : "white"};"><td style="padding:7px 10px; font-weight:600;">${esc(r.regional)}</td><td style="padding:7px 10px; text-align:center;">${r.enviadas}</td><td style="padding:7px 10px; text-align:center;">${r.cancelaram}</td><td style="padding:7px 10px; text-align:center;">${r.migraram}</td><td style="padding:7px 10px; text-align:center;">${r.noPrazo}</td><td style="padding:7px 10px; text-align:center;">${r.vencidos}</td></tr>`).join("")}</table></div>`;
+  }
+  html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:4px;">Quem são</div>
+    ${fcaTabela(L.enviadas.titulo, L.enviadas.linhas, L.enviadas.cols, false)}${fcaTabela(L.cancelados.titulo, L.cancelados.linhas, L.cancelados.cols, false)}${fcaTabela(L.migracoes.titulo, L.migracoes.linhas, L.migracoes.cols, false)}${fcaTabela(L.desmontadas.titulo, L.desmontadas.linhas, L.desmontadas.cols, false)}</div>`;
+  cont.innerHTML = html;
+  renderFcaTextos(false);
+  fcaUltimo = { preset: document.getElementById("fcaPreset").value, de: document.getElementById("fcaDe").value, ate: document.getElementById("fcaAte").value };
+  const ro = !podeEditar();
+  document.getElementById("fcaCausa").disabled = ro; document.getElementById("fcaAcao").disabled = ro;
+}
+function salvarFca() {
+  if (!exigirEdicao()) return;
+  const p = fcaPeriodo();
+  const causa = document.getElementById("fcaCausa").value.trim(), acao = document.getElementById("fcaAcao").value.trim();
+  if (!causa && !acao) delete fcaDados[p.chave];
+  else fcaDados[p.chave] = { causa: causa, acao: acao, por: nomeUsuario(), em: new Date().toISOString() };
+  fcaSujo = false;
+  registrarHistorico("FCA salvo", `semana de ${p.rotulo}`, "", "");
+  saveData();
+  renderFcaTextos(true);
+  const ok = document.getElementById("fcaSalvo"); ok.style.display = "inline"; setTimeout(() => { ok.style.display = "none"; }, 2000);
+}
+function abrirFcaPdf() {
+  document.getElementById("pdfModalTitle").innerHTML = "<strong>FCA da semana</strong>";
+  document.getElementById("periodoSeletor").style.display = "none";
+  const p = fcaPeriodo(), f = fcaFatos(p), fu = f.funil, L = fcaListas(f);
+  const causa = document.getElementById("fcaCausa").value.trim(), acao = document.getElementById("fcaAcao").value.trim();   // o que esta na tela, salvo ou nao
+  const th = "padding:6px 8px; color:white; font-size:10px; text-align:left;";
+  const caixa = (rot, n, cor) => `<td style="padding:8px 10px; border:1px solid #C5CAD8; text-align:center; width:25%;"><div style="font-size:10px; color:var(--grey); font-weight:700; text-transform:uppercase;">${rot}</div><div style="font-size:20px; font-weight:700; color:${cor};">${n}</div></td>`;
+  const anexo = (x) => x.linhas.length ? `<h4 style="margin:14px 0 4px 0; color:var(--blue-dark); font-size:12px;">${esc(x.titulo)} (${x.linhas.length})</h4>
+    <table style="width:100%; border-collapse:collapse; font-size:10.5px;"><thead><tr style="background:var(--blue-dark);">${x.cols.map(c => `<th style="${th}">${esc(c)}</th>`).join("")}</tr></thead><tbody>
+    ${x.linhas.map((l, i) => `<tr style="${i % 2 === 1 ? "background:#EEF2FF;" : ""}">${l.map((v, k) => `<td style="padding:5px 8px;${k === 0 ? " font-weight:700;" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : "";
+  const bloco = (titulo, texto) => `<h3 style="margin:16px 0 4px 0; color:var(--blue-dark); font-size:14px;">${titulo}</h3><div style="font-size:12px; line-height:1.55; white-space:pre-wrap; border:1px solid #C5CAD8; border-radius:6px; padding:8px 10px; min-height:40px;">${texto ? esc(texto) : '<span style="color:var(--grey);">(não preenchido)</span>'}</div>`;
+  const logo = document.querySelector("#loginOverlay img").src;
+  const regTab = f.porRegional.length ? `<table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:8px;"><thead><tr style="background:var(--blue-dark);"><th style="${th}">Regional</th><th style="${th} text-align:center;">Enviadas</th><th style="${th} text-align:center;">Cancelaram</th><th style="${th} text-align:center;">Migraram</th><th style="${th} text-align:center;">No prazo</th><th style="${th} text-align:center;">${PRAZO_CARTA_DIAS} dias vencidos</th></tr></thead><tbody>
+    ${f.porRegional.map((r, i) => `<tr style="${i % 2 === 1 ? "background:#EEF2FF;" : ""}"><td style="padding:5px 8px; font-weight:700;">${esc(r.regional)}</td><td style="padding:5px 8px; text-align:center;">${r.enviadas}</td><td style="padding:5px 8px; text-align:center;">${r.cancelaram}</td><td style="padding:5px 8px; text-align:center;">${r.migraram}</td><td style="padding:5px 8px; text-align:center;">${r.noPrazo}</td><td style="padding:5px 8px; text-align:center;">${r.vencidos}</td></tr>`).join("")}</tbody></table>` : "";
+  document.getElementById("resumoPdfContent").innerHTML = `
+    <img class="logo" src="${logo}" alt="UNI Internet">
+    <hr class="divider">
+    <h2 style="margin-bottom:2px;">FCA da semana — ${esc(p.rotulo)}</h2>
+    <p style="font-style:italic; color:var(--grey); margin-top:0; margin-bottom:10px;">Fato, Causa e Ação · Gerado em ${new Date().toLocaleDateString("pt-BR")} por ${esc(nomeUsuario())}</p>
+    <table style="width:100%; border-collapse:collapse; margin-bottom:6px;"><tr>${caixa("Cartas enviadas", f.enviadas.length, "#B00020")}${caixa("Dessas, cancelaram", fu.cancelaram, "#7A1F1F")}${caixa("Migrações concluídas", f.migracoes.length, "#0E8A78")}${caixa("Torres desmontadas", f.desmontadas.length, "#1A3FBF")}</tr></table>
+    <h3 style="margin:14px 0 4px 0; color:var(--blue-dark); font-size:14px;">Fato</h3>
+    <div style="font-size:12px; line-height:1.55;">${esc(fcaTextoFato(p, f))}</div>
+    <div style="font-size:11px; color:var(--grey); margin-top:6px;">Das ${f.enviadas.length} carta(s): ${fu.cancelaram} cancelaram · ${fu.migraram} migraram · ${fu.noPrazo} no prazo · ${fu.vencidos} com ${PRAZO_CARTA_DIAS} dias vencidos. Situação agora: ${f.agora.aEnviar} carta(s) a enviar · ${f.agora.vencidos} com ${PRAZO_CARTA_DIAS} dias vencidos · ${f.agora.emAndamento} em andamento.</div>
+    ${regTab}
+    ${bloco("Causa", causa)}
+    ${bloco("Ação", acao)}
+    <div style="page-break-before:always;"></div>
+    <h3 style="margin:0 0 2px 0; color:var(--blue-dark); font-size:14px;">Anexo — quem são</h3>
+    ${anexo(L.enviadas)}${anexo(L.cancelados)}${anexo(L.migracoes)}${anexo(L.desmontadas)}
+    ${(f.enviadas.length + f.canceladosSemana.length + f.migracoes.length + f.desmontadas.length) === 0 ? '<div class="empty-msg">Nada registrado nesta semana.</div>' : ""}
+    <div class="footer-note">UNI Internet, unindo pessoas, fortalecendo conexões. · Central de Atendimento: 2201-0300</div>`;
+  document.getElementById("resumoPdfModal").classList.add("show");
 }
 
 function abrirCartasPdf() {
