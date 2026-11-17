@@ -175,6 +175,8 @@
   .metric-card.clicavel { cursor: pointer; transition: box-shadow .15s, transform .15s; }
   .metric-card.clicavel:hover { box-shadow: 0 2px 10px rgba(26,63,191,0.18); transform: translateY(-1px); }
   .metric-card.selecionado { outline: 2px solid var(--blue); background: #F3F6FF; }
+  .badge-continua, .badge-concluida, .badge-desmontada { white-space: nowrap; display: inline-block; margin-top: 2px; }
+  .badge-continua { background: #FFF3CC; color: #7A5200; border: 1px solid #E6C766; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
   .badge-concluida { background: var(--green-bg); color: var(--green-text); font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
   .torres-item { cursor: pointer; transition: border-color .15s, box-shadow .15s; display: flex; justify-content: space-between; align-items: center; gap: 8px; background: var(--grey-light); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
   .torres-item:hover { border-color: var(--blue); background: white; box-shadow: 0 1px 6px rgba(26,63,191,0.15); }
@@ -472,6 +474,9 @@ Para ADICIONAR um cliente/torre novo, inclua também "regional":
       <p class="section-sub">Escolha a cidade para ver o nome de todas as torres dela e quantos clientes cada uma tem.</p>
       <div class="list-card">
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px;">
+          <select id="torresFiltro" onchange="renderTorres()" style="padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
+            <option value="">Todas as torres</option><option value="continuam">Continuam ativas</option><option value="concluidas">Concluídas</option><option value="prontas">Prontas para desmontar</option><option value="desmontadas">Desmontadas</option>
+          </select>
           <select id="torresCidade" onchange="renderTorres()" style="padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px; min-width:200px;"></select>
           <input type="text" id="torresBusca" placeholder="Buscar torre..." oninput="renderTorres()" style="flex:1; min-width:160px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); font-size:13px;">
           <span id="torresResumo" style="font-size:13px; color:var(--grey); font-weight:700;"></span>
@@ -716,7 +721,7 @@ function torreProntaParaDesmontar(torre) {
   const regs = data.filter(d => d.torre === torre);
   return regs.length > 0
     && regs.every(clienteEncerrado)
-    && !TORRES_MANTIDAS_ATIVAS.includes(torre)
+    && !torreContinua(torre)
     && !TORRES_PARTICULARES.includes(torre)
     && !torreEstaDesmontada(torre);
 }
@@ -726,7 +731,7 @@ function torreConcluida(torre) {
   return regs.length > 0 && regs.every(clienteEncerrado);
 }
 function torreResolvidaMantida(torre) {
-  return TORRES_MANTIDAS_ATIVAS.includes(torre) && torreConcluida(torre) && !torreEstaDesmontada(torre);
+  return torreContinua(torre) && torreConcluida(torre) && !torreEstaDesmontada(torre);
 }
 function parseDataBR(s) {
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((s || "").trim());
@@ -777,7 +782,7 @@ function textoSituacaoTorre(cont) {
 function motivosDeAviso(torre) {
   const cont = resumoTorre(torre).cont;
   const m = [];
-  if (TORRES_MANTIDAS_ATIVAS.includes(torre)) m.push(`• ${torre}: está marcada como torre mantida ativa (não deveria ser desmontada).`);
+  if (torreContinua(torre)) m.push(`• ${torre}: está marcada para continuar ativa (não deveria ser desmontada).`);
   if (TORRES_PARTICULARES.includes(torre)) m.push(`• ${torre}: é uma torre particular (de terceiros), ainda em tratativa.`);
   const pend = cont["Pendente"] || 0, and = cont["Em andamento"] || 0;
   if (pend || and) m.push(`• ${torre}: ainda tem ${[pend ? pend + " cliente(s) pendente(s)" : "", and ? and + " em andamento" : ""].filter(Boolean).join(" e ")}.`);
@@ -831,7 +836,7 @@ function renderDesmontagem() {
   document.getElementById("desmOutras").innerHTML = outras.length === 0 ? vazio("Nenhuma.") : `<table style="width:100%; border-collapse:collapse; font-size:13px; margin-top:10px;">
     <tr style="background:var(--blue-dark);">${cabecaCaixa}<th style="${th}">Torre</th><th style="${th}">Regional</th><th style="${th}">Clientes</th><th style="${th}">Situação</th></tr>
     ${outras.map((t, i) => { const r = resumoTorre(t);
-      const marca = TORRES_MANTIDAS_ATIVAS.includes(t) ? ' <span class="tag tag-amber">Mantida ativa</span>' : (TORRES_PARTICULARES.includes(t) ? ' <span class="tag tag-amber">Particular</span>' : "");
+      const marca = torreContinua(t) ? ' <span class="tag tag-amber">Continua ativa</span>' : (TORRES_PARTICULARES.includes(t) ? ' <span class="tag tag-amber">Particular</span>' : "");
       return `<tr style="background:${i % 2 === 0 ? "var(--grey-light)" : "white"};">${caixa(t)}<td style="padding:9px 10px; font-weight:600;">${esc(t)}${marca}</td><td style="padding:9px 10px;">${esc(r.regional)}</td><td style="padding:9px 10px;">${r.qtd}</td><td style="padding:9px 10px; font-size:12px; color:var(--grey);">${textoSituacaoTorre(r.cont)}</td></tr>`; }).join("")}
   </table>`;
 
@@ -881,6 +886,19 @@ function torresPorCidade() {
   data.forEach(d => { r[d.regional] = r[d.regional] || {}; r[d.regional][d.torre] = (r[d.regional][d.torre] || 0) + 1; });
   return r;
 }
+function torrePassaFiltro(t) {
+  const f = (document.getElementById("torresFiltro") || {}).value || "";
+  if (f === "continuam") return torreContinua(t);
+  if (f === "concluidas") return torreConcluida(t) && !torreEstaDesmontada(t);
+  if (f === "prontas") return torreProntaParaDesmontar(t);
+  if (f === "desmontadas") return torreEstaDesmontada(t);
+  return true;
+}
+// selos de cada torre na lista
+function selosTorre(t) {
+  if (torreEstaDesmontada(t)) return ' <span class="badge-desmontada">desmontada</span>';
+  return (torreContinua(t) ? ' <span class="badge-continua">Continua ativa</span>' : "") + (torreConcluida(t) ? ' <span class="badge-concluida">concluída</span>' : "");
+}
 function torresDaTela() {   // [{cidade, torres:[[nome, qtd]...]}] conforme cidade e busca escolhidas
   const mapa = torresPorCidade();
   const sel = document.getElementById("torresCidade");
@@ -888,7 +906,7 @@ function torresDaTela() {   // [{cidade, torres:[[nome, qtd]...]}] conforme cida
   const cidades = Object.keys(mapa).sort((a, b) => a.localeCompare(b, "pt-BR"));
   return (sel.value ? [sel.value] : cidades).map(c => ({
     cidade: c,
-    torres: Object.entries(mapa[c] || {}).filter(([t]) => !busca || t.toLowerCase().includes(busca)).sort(([a], [b]) => a.localeCompare(b)),
+    torres: Object.entries(mapa[c] || {}).filter(([t]) => (!busca || t.toLowerCase().includes(busca)) && torrePassaFiltro(t)).sort(([a], [b]) => a.localeCompare(b)),
   })).filter(x => x.torres.length > 0);
 }
 function renderTorres() {
@@ -904,10 +922,11 @@ function renderTorres() {
     const cli = g.torres.reduce((s, [, n]) => s + n, 0);
     totT += g.torres.length; totC += cli;
     html += `<div class="torres-cidade"><div class="torres-cidade-head"><span>${esc(g.cidade)}</span><span>${g.torres.length} torre(s) · ${cli} cliente(s)</span></div>
-      <div class="torres-grid">${g.torres.map(([t, n]) => `<div class="torres-item" data-torre="${esc(t)}" onclick="abrirTorreModal(this.dataset.torre)" title="Ver os clientes desta torre"><span class="torres-nome">${esc(t)}${torreEstaDesmontada(t) ? ' <span class="badge-desmontada">desmontada</span>' : (torreConcluida(t) ? ' <span class="badge-concluida">concluída</span>' : "")}</span><span class="torres-qtd">${n}</span></div>`).join("")}</div></div>`;
+      <div class="torres-grid">${g.torres.map(([t, n]) => `<div class="torres-item" data-torre="${esc(t)}" onclick="abrirTorreModal(this.dataset.torre)" title="Ver os clientes desta torre"><span class="torres-nome">${esc(t)}${selosTorre(t)}</span><span class="torres-qtd">${n}</span></div>`).join("")}</div></div>`;
   });
   document.getElementById("torresLista").innerHTML = html || '<div class="empty-msg">Nenhuma torre encontrada.</div>';
-  document.getElementById("torresResumo").textContent = `${totT} torre(s) · ${totC} cliente(s)`;
+  const totCont = grupos.reduce((s, g) => s + g.torres.filter(([t]) => torreContinua(t)).length, 0);
+  document.getElementById("torresResumo").textContent = `${totT} torre(s) · ${totC} cliente(s)` + (totCont ? ` · ${totCont} continuam ativas` : "");
 }
 const STATUS_TAG = {
   "Concluído": { cls: "tag-green", rotulo: "concluído(s)" },
@@ -929,7 +948,9 @@ function abrirTorreModal(torre) {
     const obs = (d.obs || "").trim();
     return `<div class="cli-linha"><span class="cli-nome">${esc(d.cliente)}</span><span class="tag ${t.cls}">${esc(rotuloStatus(d.status))}</span>${obs ? `<div class="cli-obs" title="${esc(obs)}">${esc(obs.length > 220 ? obs.slice(0, 220) + "…" : obs)}</div>` : ""}</div>`;
   }).join("");
-  document.getElementById("torreModalCorpo").innerHTML = `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px;">${resumo}${desm}</div>${lista || '<div class="empty-msg">Nenhum cliente nesta torre.</div>'}`;
+  const selo = torreContinua(torre) ? ' <span class="badge-continua">Continua ativa</span>' : "";
+  const botao = `<button class="btn-small acoes-edicao" data-torre="${esc(torre)}" onclick="alternarContinua(this.dataset.torre)" style="margin-left:auto;">${torreContinua(torre) ? 'Tirar de "continua ativa"' : 'Marcar como "continua ativa"'}</button>`;
+  document.getElementById("torreModalCorpo").innerHTML = `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">${resumo}${selo}${desm}${botao}</div>${lista || '<div class="empty-msg">Nenhum cliente nesta torre.</div>'}`;
   document.getElementById("torreModal").classList.add("show");
 }
 function fecharTorreModal() {
@@ -939,7 +960,7 @@ function fecharTorreModal() {
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") fecharTorreModal(); });
 
 function textoTorres() {
-  return torresDaTela().map(g => `${g.cidade} (${g.torres.length} torres, ${g.torres.reduce((s, [, n]) => s + n, 0)} clientes)\n` + g.torres.map(([t, n]) => `${t} - ${n}`).join("\n")).join("\n\n");
+  return torresDaTela().map(g => `${g.cidade} (${g.torres.length} torres, ${g.torres.reduce((s, [, n]) => s + n, 0)} clientes)\n` + g.torres.map(([t, n]) => `${t} - ${n}${torreContinua(t) ? " [continua ativa]" : ""}`).join("\n")).join("\n\n");
 }
 async function copiarTorres(btn) {
   const texto = textoTorres();
@@ -951,9 +972,8 @@ async function copiarTorres(btn) {
 function etiquetaTorrePdf(torre) {
   const estilo = "display:inline-block; margin-left:6px; padding:1px 7px; border-radius:10px; font-size:9px; font-weight:700; vertical-align:middle;";
   if (torreEstaDesmontada(torre)) return `<span style="${estilo} background:#E3E8F5; color:#4A5470; border:1px solid #B7C0D8;">Desmontada</span>`;
-  if (torreResolvidaMantida(torre)) return `<span style="${estilo} background:#E4F6EF; color:#0F6E56; border:1px solid #8FD3BB;">Concluída · continua ativa</span>`;
-  if (torreConcluida(torre)) return `<span style="${estilo} background:#E4F6EF; color:#0F6E56; border:1px solid #8FD3BB;">Concluída</span>`;
-  return "";
+  return (torreContinua(torre) ? `<span style="${estilo} background:#FFF3CC; color:#7A5200; border:1px solid #E6C766;">Continua ativa</span>` : "") +
+    (torreConcluida(torre) ? `<span style="${estilo} background:#E4F6EF; color:#0F6E56; border:1px solid #8FD3BB;">Concluída</span>` : "");
 }
 function abrirTorresPdf() {
   document.getElementById("pdfModalTitle").innerHTML = "<strong>Torres por cidade</strong>";
@@ -961,14 +981,17 @@ function abrirTorresPdf() {
   const grupos = torresDaTela();
   const cidadeSel = document.getElementById("torresCidade").value;
   const busca = document.getElementById("torresBusca").value;
-  const filtros = [cidadeSel ? `Cidade: ${cidadeSel}` : "Todas as cidades"].concat(busca ? [`Busca: "${busca}"`] : []);
+  const filtroTor = (document.getElementById("torresFiltro") || {}).value || "";
+  const rotFiltro = { continuam: "Só as torres que continuam ativas", concluidas: "Só as torres concluídas", prontas: "Só as torres prontas para desmontar", desmontadas: "Só as torres desmontadas" };
+  const filtros = [cidadeSel ? `Cidade: ${cidadeSel}` : "Todas as cidades"].concat(filtroTor ? [rotFiltro[filtroTor]] : []).concat(busca ? [`Busca: "${busca}"`] : []);
   const th = 'padding:7px 8px; color:white; font-size:11px; text-align:left;';
-  let corpo = "", totT = 0, totC = 0, totConc = 0, totDesm = 0;
+  let corpo = "", totT = 0, totC = 0, totConc = 0, totDesm = 0, totCont = 0;
   grupos.forEach(g => {
     const cli = g.torres.reduce((s, [, n]) => s + n, 0);
     totT += g.torres.length; totC += cli;
     const nConc = g.torres.filter(([t]) => !torreEstaDesmontada(t) && torreConcluida(t)).length;
     totConc += nConc; totDesm += g.torres.filter(([t]) => torreEstaDesmontada(t)).length;
+    const nCont = g.torres.filter(([t]) => torreContinua(t)).length; totCont += nCont;
     const meio = Math.ceil(g.torres.length / 2);
     let linhas = "";
     for (let i = 0; i < meio; i++) {
@@ -977,12 +1000,12 @@ function abrirTorresPdf() {
       linhas += `<tr style="${bg}"><td style="padding:5px 8px; font-weight:700;">${esc(a[0])}${etiquetaTorrePdf(a[0])}</td><td style="padding:5px 8px; text-align:center;">${a[1]}</td>` +
         (b ? `<td style="padding:5px 8px; font-weight:700;">${esc(b[0])}${etiquetaTorrePdf(b[0])}</td><td style="padding:5px 8px; text-align:center;">${b[1]}</td>` : "<td></td><td></td>") + "</tr>";
     }
-    corpo += `<h3 style="margin:16px 0 6px 0; color:var(--blue-dark); font-size:15px;">${esc(g.cidade)} <span style="font-size:11px; color:var(--grey); font-weight:700;">&nbsp;${g.torres.length} torre(s) · ${cli} cliente(s)${nConc ? ` · ${nConc} concluída(s)` : ""}</span></h3>
+    corpo += `<h3 style="margin:16px 0 6px 0; color:var(--blue-dark); font-size:15px;">${esc(g.cidade)} <span style="font-size:11px; color:var(--grey); font-weight:700;">&nbsp;${g.torres.length} torre(s) · ${cli} cliente(s)${nCont ? ` · ${nCont} continuam ativas` : ""}${nConc ? ` · ${nConc} concluída(s)` : ""}</span></h3>
       <table style="width:100%; border-collapse:collapse; font-size:12px; page-break-inside:auto;">
         <tr style="background:var(--blue-dark);"><th style="${th}">Torre</th><th style="${th} text-align:center;">Clientes</th><th style="${th}">Torre</th><th style="${th} text-align:center;">Clientes</th></tr>${linhas}</table>`;
   });
-  const total = (grupos.length > 1 ? `<p style="margin-top:14px; font-size:13px;"><strong>Total: ${totT} torres · ${totC} clientes${totConc ? ` · ${totConc} torre(s) concluída(s)` : ""}</strong></p>` : "") +
-    ((totConc || totDesm) ? `<p style="font-size:10px; color:var(--grey); margin:6px 0 0 0;">${totConc ? "<strong>Concluída</strong>: todos os clientes da torre já foram resolvidos (migrados, ou cancelados com a carta enviada). " : ""}${totDesm ? "<strong>Desmontada</strong>: a torre já foi desmontada." : ""}</p>` : "");
+  const total = (grupos.length > 1 ? `<p style="margin-top:14px; font-size:13px;"><strong>Total: ${totT} torres · ${totC} clientes${totCont ? ` · ${totCont} continuam ativas` : ""}${totConc ? ` · ${totConc} torre(s) concluída(s)` : ""}</strong></p>` : "") +
+    ((totConc || totDesm || totCont) ? `<p style="font-size:10px; color:var(--grey); margin:6px 0 0 0;">${totCont ? "<strong>Continua ativa</strong>: a torre vai continuar funcionando e não será desmontada. " : ""}${totConc ? "<strong>Concluída</strong>: todos os clientes da torre já foram resolvidos (migrados, ou cancelados com a carta enviada). " : ""}${totDesm ? "<strong>Desmontada</strong>: a torre já foi desmontada." : ""}</p>` : "");
   const logo = document.querySelector("#loginOverlay img").src;
   document.getElementById("resumoPdfContent").innerHTML = `
     <img class="logo" src="${logo}" alt="UNI Internet">
@@ -1330,6 +1353,7 @@ function conectarFirestore() {
     if (doc.exists && doc.data().items) {
       data = doc.data().items;
       fcaDados = doc.data().fca || {};
+      continuamDados = Array.isArray(doc.data().continuam) ? doc.data().continuam : null;
     } else {
       data = [];
       DOC_REF.set({ items: [], atualizadoEm: new Date().toISOString(), atualizadoPor: usuario ? usuario.email : "" });
@@ -1368,7 +1392,7 @@ async function saveData(showIndicator = true) {
   }
   try {
     salvandoLocalmente = true;
-    await DOC_REF.set({ items: data, fca: fcaDados, atualizadoEm: new Date().toISOString(), atualizadoPor: usuario.email });
+    await DOC_REF.set({ items: data, fca: fcaDados, continuam: continuamDados, atualizadoEm: new Date().toISOString(), atualizadoPor: usuario.email });
     if (showIndicator) {
       const ind = document.getElementById("saveIndicator");
       if (ind) { ind.classList.add("show"); setTimeout(() => ind.classList.remove("show"), 1200); }
@@ -1767,7 +1791,7 @@ function renderContent() {
       const pronta = torreProntaParaDesmontar(torre);
       const acaoTorre = desmontada
         ? `<span class="badge-desmontada">Desmontada${dataDesmontagemTorre(torre) ? " em " + dataDesmontagemTorre(torre) : ""}${desmontadaPorTorre(torre) ? " · por " + esc(desmontadaPorTorre(torre)) : ""}</span><button class="btn-torre" onclick="desmarcarTorreDesmontada('${torre}')">Desfazer</button>`
-        : `${pronta ? '<span class="badge-pronta">Pronta p/ desmonte</span>' : (torreResolvidaMantida(torre) ? '<span class="badge-concluida">Concluída · continua ativa</span>' : '')}<button class="btn-torre" onclick="marcarTorreDesmontada('${torre}')">Marcar desmontada</button>`;
+        : `${pronta ? '<span class="badge-pronta">Pronta p/ desmonte</span>' : (torreContinua(torre) ? '<span class="badge-continua">Continua ativa' + (torreConcluida(torre) ? ' · concluída' : '') + '</span>' : '')}<button class="btn-torre" onclick="marcarTorreDesmontada('${torre}')">Marcar desmontada</button>`;
       html += `<div class="torre-block"><div class="torre-header"><span>${torre} — ${clientes.length} cliente(s)</span><span class="torre-acoes">${acaoTorre}</span></div>`;
 
       clientes.forEach(c => {
@@ -2033,6 +2057,22 @@ async function gerarCartasLote() {
 }
 
 // ===== FCA da semana: Fato (automatico), Causa e Acao (escritas por quem edita) =====
+// torres que vao continuar ativas (nao serao desmontadas). null = a lista padrao (TORRES_MANTIDAS_ATIVAS); depois que alguem marca ou desmarca, vale a lista salva no painel
+let continuamDados = null;
+function listaContinuam() { return continuamDados || TORRES_MANTIDAS_ATIVAS; }
+function torreContinua(t) { return listaContinuam().includes(t); }
+function alternarContinua(torre) {
+  if (!exigirEdicao()) return;
+  const lista = listaContinuam().slice(), i = lista.indexOf(torre);
+  const msg = i >= 0 ? `Tirar a torre ${torre} de "continua ativa"?\n\nEla volta a poder ser desmontada e a ficar "pronta para desmontar".`
+                     : `Marcar a torre ${torre} para continuar ativa?\n\nEla deixa de aparecer como "pronta para desmontar" e ganha o selo "Continua ativa".`;
+  if (!window.confirm(msg)) return;
+  if (i >= 0) lista.splice(i, 1); else lista.push(torre);
+  continuamDados = lista;
+  registrarHistorico(i >= 0 ? "Torre deixou de continuar ativa" : "Torre marcada para continuar ativa", torre, torre, "");
+  saveData(); renderAll();
+  if (document.getElementById("torreModal").classList.contains("show")) abrirTorreModal(torre);
+}
 let fcaDados = {};            // { "2026-11-02_2026-11-08": { causa, acao, por, em } }
 let fcaChaveAtual = "";
 let fcaSujo = false;          // ha texto digitado ainda nao salvo
@@ -2541,7 +2581,7 @@ function renderResumo() {
 
   const listaProntas = [], listaMantidas = [], listaParticulares = [], listaCanceladas = [], listaPendentes = [];
   Object.entries(torresMap).forEach(([torre, sts]) => {
-    if (TORRES_MANTIDAS_ATIVAS.includes(torre)) {
+    if (torreContinua(torre)) {
       listaMantidas.push(torre);
     } else if (TORRES_PARTICULARES.includes(torre)) {
       listaParticulares.push(torre);
@@ -2691,7 +2731,7 @@ function renderConsulta() {
   const torresPendentesSet = new Set(
     Object.entries(torresMap)
       .filter(([t, sts]) => sts.every(s => s === "Pendente"))
-      .filter(([t]) => !TORRES_MANTIDAS_ATIVAS.includes(t) && !TORRES_PARTICULARES.includes(t))
+      .filter(([t]) => !torreContinua(t) && !TORRES_PARTICULARES.includes(t))
       .filter(([t]) => !torreEstaDesmontada(t))
       .map(([t]) => t)
   );
@@ -2842,7 +2882,7 @@ function renderConsulta() {
     Object.entries(torresMapFiltro).forEach(([torre, clientes]) => {
       const sts = clientes.map(c => c.status);
       if (torreEstaDesmontada(torre)) catDesmontadas.push(`${torre} (${dataDesmontagemTorre(torre) || "sem data"})`);
-      else if (TORRES_MANTIDAS_ATIVAS.includes(torre)) (sts.every(s => s === "Concluído") ? catConcluidasAtivas : catMantidas).push(torre);
+      else if (torreContinua(torre)) (sts.every(s => s === "Concluído") ? catConcluidasAtivas : catMantidas).push(torre);
       else if (TORRES_PARTICULARES.includes(torre)) catParticulares.push(torre);
       else if (torreEncerrada(torre)) catProntas.push(torre);
       else if (sts.every(s => s === ST_SERA)) catCanceladasTorre.push(torre);
@@ -3038,7 +3078,7 @@ function abrirResumoPdf() {
 
   const listaProntas = [], listaMantidas = [], listaParticulares = [], listaCanceladas = [], listaPendentes = [];
   Object.entries(torresMap).forEach(([torre, sts]) => {
-    if (TORRES_MANTIDAS_ATIVAS.includes(torre)) listaMantidas.push(torre);
+    if (torreContinua(torre)) listaMantidas.push(torre);
     else if (TORRES_PARTICULARES.includes(torre)) listaParticulares.push(torre);
     else if (torreEncerrada(torre)) listaProntas.push(torre);
     else if (sts.every(s => s === ST_SERA)) listaCanceladas.push(torre);
