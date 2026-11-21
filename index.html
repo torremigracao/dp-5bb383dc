@@ -2185,11 +2185,23 @@ function fcaFatos(p, hist) {
   };
   const totais = { migrados: data.filter(c => c.status === "Concluído").length, serao: sera.length, cancelados: data.filter(c => c.status === ST_CANC).length,
     prontas: [...new Set(data.map(c => c.torre))].filter(t => torreProntaParaDesmontar(t)).length };
+  // torres prontas para desmontar: ficaram prontas quando o ULTIMO cliente foi encerrado (migrado, ou cancelado com a carta enviada)
+  const antigo = new Date(0);
+  const quandoEncerrou = (c) => {
+    if (c.status === "Concluído") { const x = dataDoStatus(c, "concluidoEm", "Concluído"); return { d: x.quando || antigo, aprox: x.aprox && !!x.quando }; }
+    const x = dataDoStatus(c, "canceladoEm", ST_CANC), carta = parseDataBR(c.dataEnvioCarta), base = x.quando || antigo;
+    return (carta && carta > base) ? { d: carta, aprox: false } : { d: base, aprox: x.aprox && !!x.quando };
+  };
+  const prontasLista = [...new Set(data.map(c => c.torre))].filter(t => torreProntaParaDesmontar(t)).map(t => {
+    const regs = data.filter(c => c.torre === t).map(quandoEncerrou).sort((a, b) => b.d - a.d);
+    return { torre: t, regional: (data.find(c => c.torre === t) || {}).regional || "", clientes: regs.length, quando: regs[0].d, aprox: regs[0].aprox };
+  }).sort((a, b) => a.quando - b.quando || a.torre.localeCompare(b.torre));
+  const prontasSemana = prontasLista.filter(x => x.quando.getTime() > 0 && dentro(x.quando));
   const semDataFim = data.filter(c => (c.status === ST_CANC && !dataExata(c, "canceladoEm", ST_CANC)) || (c.status === "Concluído" && !dataExata(c, "concluidoEm", "Concluído"))).length;
   // contados pela data da ultima alteracao (sem a data exata do status): a pessoa confere, fixa a data ou tira da semana
   const possiveis = migracoes.concat(canceladosSemana).filter(x => x.aprox).sort((a, b) => a.quando - b.quando);
   const tiposMig = {}; migracoes.forEach(x => { const k = fcaTipoMigracao(x.c.obs); tiposMig[k] = (tiposMig[k] || 0) + 1; });
-  return { enviadas, funil, canceladosSemana, migracoes, emAndamentoLista, desmontadas, porRegional, agora, totais, semDataFim, possiveis, situacao, tiposMig,
+  return { enviadas, funil, canceladosSemana, migracoes, emAndamentoLista, desmontadas, prontasSemana, prontasLista, porRegional, agora, totais, semDataFim, possiveis, situacao, tiposMig,
     migPorReg: contaReg(migracoes.map(x => x.c)), canPorReg: contaReg(canceladosSemana.map(x => x.c)),
     aproxMig: migracoes.filter(x => x.aprox).length, aproxCan: canceladosSemana.filter(x => x.aprox).length };
 }
@@ -2220,9 +2232,12 @@ function fcaTextoFato(p, f) {
   linhas.push({ rot: "Cancelamentos", txt: (k ? `${pl(k, "cliente foi cancelado", "clientes foram cancelados")} na semana (${porReg(f.canPorReg)}).` : "Nenhum cliente foi cancelado na semana.") +
     (s ? ` Ainda ${s === 1 ? "há 1 cliente que será cancelado" : `há ${s} clientes que serão cancelados`}: ${f.agora.seraAEnviar} com a carta a enviar, ${f.agora.seraNoPrazo} dentro do prazo e ${f.agora.seraVencidos} com os ${PRAZO_CARTA_DIAS} dias vencidos.` : " Não há clientes aguardando cancelamento.") });
   // torres
-  const t = f.desmontadas.length, nomes = f.desmontadas.map(x => x.torre);
-  linhas.push({ rot: "Torres", txt: (t ? `${pl(t, "torre foi desmontada", "torres foram desmontadas")} na semana (${nomes.slice(0, 6).join(", ")}${nomes.length > 6 ? ` e mais ${nomes.length - 6}` : ""}).` : "Nenhuma torre foi desmontada na semana.") +
-    (f.totais.prontas ? ` ${pl(f.totais.prontas, "torre está pronta", "torres estão prontas")} para desmontar.` : " Nenhuma torre está pronta para desmontar.") });
+  const lista6 = (arr) => arr.slice(0, 6).join(", ") + (arr.length > 6 ? ` e mais ${arr.length - 6}` : "");
+  const r = f.prontasSemana.length, t = f.desmontadas.length, tot = f.totais.prontas;
+  linhas.push({ rot: "Torres", txt:
+    (r ? `${pl(r, "torre ficou pronta", "torres ficaram prontas")} para desmontar na semana (${lista6(f.prontasSemana.map(x => x.torre))}).` : "Nenhuma torre ficou pronta para desmontar na semana.") + " " +
+    (t ? `${pl(t, "torre foi desmontada", "torres foram desmontadas")} na semana (${lista6(f.desmontadas.map(x => x.torre))}).` : "Nenhuma torre foi desmontada na semana.") + " " +
+    (tot ? `Ao todo, ${tot === 1 ? "1 torre está pronta" : `${tot} torres estão prontas`} aguardando a desmontagem.` : "Nenhuma torre está pronta aguardando a desmontagem.") });
   return linhas;
 }
 function fcaTabela(titulo, linhas, cols, aberto) {
@@ -2241,6 +2256,8 @@ function fcaListas(f) {
     migracoes: { titulo: "Migrações concluídas na semana", cols: ["Cliente", "Torre", "Regional", "Concluído em", "Tipo"], linhas: f.migracoes.map(x => [x.c.cliente, x.c.torre, x.c.regional, dBR(x.quando, x.aprox), (FCA_TIPOS.find(t => t[0] === fcaTipoMigracao(x.c.obs)) || [0, "—"])[1].replace("sem detalhe na observação", "sem detalhe")]) },
     andamento: { titulo: "Migrações em andamento (hoje)", cols: ["Cliente", "Torre", "Regional", "Observação"], linhas: f.emAndamentoLista.map(c => [c.cliente, c.torre, c.regional, curto(c.obs)]) },
     cancelados: { titulo: "Clientes cancelados na semana", cols: ["Cliente", "Torre", "Regional", "Cancelado em"], linhas: f.canceladosSemana.map(x => [x.c.cliente, x.c.torre, x.c.regional, dBR(x.quando, x.aprox)]) },
+    prontas: { titulo: "Torres que ficaram prontas para desmontar na semana", cols: ["Torre", "Regional", "Clientes", "Ficou pronta em"], linhas: f.prontasSemana.map(x => [x.torre, x.regional, String(x.clientes), dBR(x.quando, x.aprox)]) },
+    prontasAgora: { titulo: "Torres prontas aguardando desmontagem (hoje)", cols: ["Torre", "Regional", "Clientes", "Pronta desde"], linhas: f.prontasLista.map(x => [x.torre, x.regional, String(x.clientes), x.quando.getTime() > 0 ? dBR(x.quando, x.aprox) : "antes do FCA"]) },
     desmontadas: { titulo: "Torres desmontadas na semana", cols: ["Torre", "Regional", "Desmontada em"], linhas: f.desmontadas.map(t => [t.torre, t.regional, t.data]) },
   };
 }
@@ -2308,7 +2325,7 @@ function renderFca() {
   const f = fcaFatos(p, fcaHist.chave === p.chave ? fcaHist.eventos : []), fu = f.funil, L = fcaListas(f);
   const card = (cls, rot, n) => `<div class="metric-card ${cls}"><div class="label">${rot}</div><div class="num">${n}</div></div>`;
   let html = `<div class="card-grid" style="margin-bottom:14px;">
-    ${card("c-red", "Cartas enviadas", f.enviadas.length)}${card("c-dark", "Dessas, cancelaram", fu.cancelaram)}${card("c-teal", "Migrações concluídas", f.migracoes.length)}${card("c-amber", "Cancelados na semana", f.canceladosSemana.length)}${card("c-blue", "Torres desmontadas", f.desmontadas.length)}
+    ${card("c-red", "Cartas enviadas", f.enviadas.length)}${card("c-dark", "Dessas, cancelaram", fu.cancelaram)}${card("c-teal", "Migrações concluídas", f.migracoes.length)}${card("c-amber", "Cancelados na semana", f.canceladosSemana.length)}${card("c-blue", "Prontas p/ desmontar na semana", f.prontasSemana.length)}${card("c-blue", "Torres desmontadas", f.desmontadas.length)}
   </div>`;
   html += `<div class="list-card" style="margin-bottom:14px;" id="fcaFatoBox">
     <div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:8px;">Fato</div>
@@ -2337,7 +2354,7 @@ function renderFca() {
   }
   if (f.porRegional.length) html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:6px;">Por regional</div>${fcaTabelaRegional(f, false)}</div>`;
   html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:4px;">Quem são</div>
-    ${[L.enviadas, L.migracoes, L.andamento, L.cancelados, L.desmontadas].map(x => fcaTabela(x.titulo, x.linhas, x.cols, false)).join("")}</div>`;
+    ${[L.enviadas, L.migracoes, L.andamento, L.cancelados, L.prontas, L.prontasAgora, L.desmontadas].map(x => fcaTabela(x.titulo, x.linhas, x.cols, false)).join("")}</div>`;
   cont.innerHTML = html;
   renderFcaTextos(false);
   fcaUltimo = { preset: document.getElementById("fcaPreset").value, de: document.getElementById("fcaDe").value, ate: document.getElementById("fcaAte").value };
@@ -2362,19 +2379,19 @@ function abrirFcaPdf() {
   const p = fcaPeriodo(), f = fcaFatos(p, fcaHist.chave === p.chave ? fcaHist.eventos : []), fu = f.funil, L = fcaListas(f);
   const causa = document.getElementById("fcaCausa").value.trim(), acao = document.getElementById("fcaAcao").value.trim();   // o que esta na tela, salvo ou nao
   const th = "padding:6px 8px; color:white; font-size:10px; text-align:left;";
-  const caixa = (rot, n, cor) => `<td style="padding:8px 6px; border:1px solid #C5CAD8; text-align:center; width:20%;"><div style="font-size:9px; color:var(--grey); font-weight:700; text-transform:uppercase;">${rot}</div><div style="font-size:19px; font-weight:700; color:${cor};">${n}</div></td>`;
+  const caixa = (rot, n, cor) => `<td style="padding:8px 6px; border:1px solid #C5CAD8; text-align:center; width:16.6%;"><div style="font-size:9px; color:var(--grey); font-weight:700; text-transform:uppercase;">${rot}</div><div style="font-size:19px; font-weight:700; color:${cor};">${n}</div></td>`;
   const anexo = (x) => x.linhas.length ? `<h4 style="margin:14px 0 4px 0; color:var(--blue-dark); font-size:12px;">${esc(x.titulo)} (${x.linhas.length})</h4>
     <table style="width:100%; border-collapse:collapse; font-size:10.5px;"><thead><tr style="background:var(--blue-dark);">${x.cols.map(c => `<th style="${th}">${esc(c)}</th>`).join("")}</tr></thead><tbody>
     ${x.linhas.map((l, i) => `<tr style="${i % 2 === 1 ? "background:#EEF2FF;" : ""}">${l.map((v, k) => `<td style="padding:5px 8px;${k === 0 ? " font-weight:700;" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : "";
   const bloco = (titulo, texto) => `<h3 style="margin:16px 0 4px 0; color:var(--blue-dark); font-size:14px;">${titulo}</h3><div style="font-size:12px; line-height:1.55; white-space:pre-wrap; border:1px solid #C5CAD8; border-radius:6px; padding:8px 10px; min-height:40px;">${texto ? esc(texto) : '<span style="color:var(--grey);">(não preenchido)</span>'}</div>`;
   const logo = document.querySelector("#loginOverlay img").src;
-  const anexos = [L.enviadas, L.migracoes, L.andamento, L.cancelados, L.desmontadas].map(anexo).join("");
+  const anexos = [L.enviadas, L.migracoes, L.andamento, L.cancelados, L.prontas, L.prontasAgora, L.desmontadas].map(anexo).join("");
   document.getElementById("resumoPdfContent").innerHTML = `
     <img class="logo" src="${logo}" alt="UNI Internet">
     <hr class="divider">
     <h2 style="margin-bottom:2px;">FCA da semana — ${esc(p.rotulo)}</h2>
     <p style="font-style:italic; color:var(--grey); margin-top:0; margin-bottom:10px;">Fato, Causa e Ação · Gerado em ${new Date().toLocaleDateString("pt-BR")} por ${esc(nomeUsuario())}</p>
-    <table style="width:100%; border-collapse:collapse; margin-bottom:6px;"><tr>${caixa("Cartas enviadas", f.enviadas.length, "#B00020")}${caixa("Dessas, cancelaram", fu.cancelaram, "#7A1F1F")}${caixa("Migrações concluídas", f.migracoes.length, "#0E8A78")}${caixa("Cancelados na semana", f.canceladosSemana.length, "#B45309")}${caixa("Torres desmontadas", f.desmontadas.length, "#1A3FBF")}</tr></table>
+    <table style="width:100%; border-collapse:collapse; margin-bottom:6px;"><tr>${caixa("Cartas enviadas", f.enviadas.length, "#B00020")}${caixa("Dessas, cancelaram", fu.cancelaram, "#7A1F1F")}${caixa("Migrações concluídas", f.migracoes.length, "#0E8A78")}${caixa("Cancelados na semana", f.canceladosSemana.length, "#B45309")}${caixa("Prontas p/ desmontar na semana", f.prontasSemana.length, "#1A3FBF")}${caixa("Torres desmontadas", f.desmontadas.length, "#1A3FBF")}</tr></table>
     <h3 style="margin:14px 0 4px 0; color:var(--blue-dark); font-size:14px;">Fato</h3>
     <div style="font-size:12px; line-height:1.55;">${fcaTextoFato(p, f).map(l => `<p style="margin:0 0 6px 0;"><strong>${l.rot}:</strong> ${esc(l.txt)}</p>`).join("")}</div>
     ${(f.aproxMig + f.aproxCan) ? `<div style="font-size:10px; color:var(--grey); margin-top:4px;">${f.aproxMig} migração(ões) e ${f.aproxCan} cancelamento(s) contados pela data da última alteração do cliente; no anexo, essas datas aparecem com "~".</div>` : ""}
