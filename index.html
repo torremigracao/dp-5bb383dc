@@ -2344,16 +2344,14 @@ function fcaTextoFato(p, f) {
   const k = f.canceladosSemana.length, s = f.totais.serao;
   linhas.push({ rot: "Cancelamentos", txt: (k ? `${pl(k, "cliente foi cancelado", "clientes foram cancelados")} na semana (${porReg(f.canPorReg)}).` : "Nenhum cliente foi cancelado na semana.") +
     (s ? ` Ainda ${s === 1 ? "há 1 cliente que será cancelado" : `há ${s} clientes que serão cancelados`}: ${f.agora.seraAEnviar} com a carta a enviar, ${f.agora.seraNoPrazo} dentro do prazo e ${f.agora.seraVencidos} com os ${PRAZO_CARTA_DIAS} dias vencidos.` : " Não há clientes aguardando cancelamento.") });
-  // decisoes sobre torres
-  const dc = f.decidContinua, dd = f.decidDesmontar;
-  linhas.push({ rot: "Decisões", txt:
-    (dc.length ? `${pl(dc.length, "torre concluída ficou ativa", "torres concluídas ficaram ativas")} na semana (${lista6(dc.map(x => x.torre))}), mantendo ${pl(f.clientesContinua, "cliente", "clientes")}.` : "Nenhuma torre concluída ficou ativa na semana.") + " " +
-    (f.continuamComPendencia.length ? `${pl(f.continuamComPendencia.length, "torre foi marcada", "torres foram marcadas")} para continuar, mas ainda ${f.continuamComPendencia.length === 1 ? "tem" : "têm"} clientes a resolver (${lista6(f.continuamComPendencia.map(x => x.torre))}). ` : "") +
-    (dd.length ? `${pl(dd.length, "torre foi decidida para desmontar", "torres foram decididas para desmontar")} na semana (${lista6(dd.map(x => x.torre))}), com ${pl(f.clientesDesmontar, "cliente afetado", "clientes afetados")}.` : "Nenhuma torre foi decidida para desmontar na semana.") });
+  // torres concluidas que ficaram ativas (as que vao desmontar so entram no FCA depois de desmontadas)
+  const dc = f.decidContinua;
+  const ativasTxt = (dc.length ? `${pl(dc.length, "torre concluída ficou ativa", "torres concluídas ficaram ativas")} na semana (${lista6(dc.map(x => x.torre))}), mantendo ${pl(f.clientesContinua, "cliente", "clientes")}.` : "Nenhuma torre concluída ficou ativa na semana.") +
+    (f.continuamComPendencia.length ? ` ${pl(f.continuamComPendencia.length, "torre foi marcada", "torres foram marcadas")} para continuar, mas ainda ${f.continuamComPendencia.length === 1 ? "tem" : "têm"} clientes a resolver (${lista6(f.continuamComPendencia.map(x => x.torre))}).` : "");
   // torres
   const r = f.prontasSemana.length, t = f.desmontadas.length, tot = f.totais.prontas;
   linhas.push({ rot: "Torres", txt:
-    (r ? `${pl(r, "torre ficou pronta", "torres ficaram prontas")} para desmontar na semana (${lista6(f.prontasSemana.map(x => x.torre))}).` : "Nenhuma torre ficou pronta para desmontar na semana.") + " " +
+    ativasTxt + " " + (r ? `${pl(r, "torre ficou pronta", "torres ficaram prontas")} para desmontar na semana (${lista6(f.prontasSemana.map(x => x.torre))}).` : "Nenhuma torre ficou pronta para desmontar na semana.") + " " +
     (t ? `${pl(t, "torre foi desmontada", "torres foram desmontadas")} na semana (${lista6(f.desmontadas.map(x => x.torre))}).` : "Nenhuma torre foi desmontada na semana.") + " " +
     (tot ? `Ao todo, ${tot === 1 ? "1 torre está pronta" : `${tot} torres estão prontas`} aguardando a desmontagem.` : "Nenhuma torre está pronta aguardando a desmontagem.") });
   return linhas;
@@ -2475,7 +2473,7 @@ function renderFca() {
   }
   if (f.porRegional.length) html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:6px;">Por regional</div>${fcaTabelaRegional(f, false)}</div>`;
   html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:4px;">Quem são</div>
-    ${[L.enviadas, L.migracoes, L.andamento, L.cancelados, L.decidContinua].concat(L.continuamPend.linhas.length ? [L.continuamPend] : []).concat([L.decidDesmontar, L.prontas, L.prontasAgora, L.desmontadas]).map(x => fcaTabela(x.titulo, x.linhas, x.cols, false)).join("")}</div>`;
+    ${[L.enviadas, L.migracoes, L.andamento, L.cancelados, L.decidContinua].concat(L.continuamPend.linhas.length ? [L.continuamPend] : []).concat([L.prontas, L.prontasAgora, L.desmontadas]).map(x => fcaTabela(x.titulo, x.linhas, x.cols, false)).join("")}</div>`;
   cont.innerHTML = html;
   renderFcaTextos(false);
   fcaUltimo = { preset: document.getElementById("fcaPreset").value, de: document.getElementById("fcaDe").value, ate: document.getElementById("fcaAte").value };
@@ -2506,7 +2504,7 @@ function abrirFcaPdf() {
     ${x.linhas.map((l, i) => `<tr style="${i % 2 === 1 ? "background:#EEF2FF;" : ""}">${l.map((v, k) => `<td style="padding:5px 8px;${k === 0 ? " font-weight:700;" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : "";
   const bloco = (titulo, texto) => `<h3 style="margin:16px 0 4px 0; color:var(--blue-dark); font-size:14px;">${titulo}</h3><div style="font-size:12px; line-height:1.55; white-space:pre-wrap; border:1px solid #C5CAD8; border-radius:6px; padding:8px 10px; min-height:40px;">${texto ? esc(texto) : '<span style="color:var(--grey);">(não preenchido)</span>'}</div>`;
   const logo = document.querySelector("#loginOverlay img").src;
-  const anexos = [L.enviadas, L.migracoes, L.andamento, L.cancelados, L.decidContinua].concat(L.continuamPend.linhas.length ? [L.continuamPend] : []).concat([L.decidDesmontar, L.prontas, L.prontasAgora, L.desmontadas]).map(anexo).join("");
+  const anexos = [L.enviadas, L.migracoes, L.andamento, L.cancelados, L.decidContinua].concat(L.continuamPend.linhas.length ? [L.continuamPend] : []).concat([L.prontas, L.prontasAgora, L.desmontadas]).map(anexo).join("");
   document.getElementById("resumoPdfContent").innerHTML = `
     <img class="logo" src="${logo}" alt="UNI Internet">
     <hr class="divider">
