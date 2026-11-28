@@ -2389,8 +2389,8 @@ function fcaTextoFato(p, f) {
   const m = f.migracoes.length;
   const tipos = FCA_TIPOS.filter(([k]) => f.tiposMig[k]).map(([k, rot]) => `${f.tiposMig[k]} ${rot}`);
   const frasePorTipo = (tipos.length && f.tiposMig.semDetalhe !== m) ? ` Por tipo: ${tipos.length > 1 ? tipos.slice(0, -1).join(", ") + " e " + tipos[tipos.length - 1] : tipos[0]}.` : "";
-  linhas.push({ rot: "Migrações", txt: (m ? `${pl(m, "migração foi concluída", "migrações foram concluídas")} na semana (${porReg(f.migPorReg)}).${frasePorTipo}` : "Nenhuma migração foi concluída na semana.") +
-    ` ${f.agora.emAndamento === 0 ? "Nenhum cliente está" : f.agora.emAndamento === 1 ? "1 cliente está" : `${f.agora.emAndamento} clientes estão`} com a migração em andamento, e ${pl(f.totais.migrados, "cliente já migrou", "clientes já migraram")} no total.` });
+  linhas.push({ rot: "Migrações", txt: m ? `${pl(m, "migração foi concluída", "migrações foram concluídas")} na semana (${porReg(f.migPorReg)}).${frasePorTipo}` : "Nenhuma migração foi concluída na semana." });
+
   // cancelamentos
   const k = f.canceladosSemana.length, s = f.totais.serao;
   linhas.push({ rot: "Cancelamentos", txt: (k ? `${pl(k, "cliente foi cancelado", "clientes foram cancelados")} na semana (${porReg(f.canPorReg)}).` : "Nenhum cliente foi cancelado na semana.") +
@@ -2483,9 +2483,9 @@ function fcaTabelaRegional(f, pdf) {
   if (!f.porRegional.length) return "";
   const th = pdf ? "padding:6px 8px; color:white; font-size:10px; text-align:center;" : "padding:7px 10px; color:white; font-size:11px; text-align:center;";
   const td = pdf ? "padding:5px 8px; text-align:center;" : "padding:7px 10px; text-align:center;";
-  const cab = ["Cartas enviadas", "Cancelaram (das cartas)", "Cancelados na semana", "Migrações concluídas", "Em andamento (hoje)", `${PRAZO_CARTA_DIAS} dias vencidos (hoje)`];
+  const cab = ["Cartas enviadas", "Cancelaram (das cartas)", "Cancelados na semana", "Migrações concluídas", `${PRAZO_CARTA_DIAS} dias vencidos (hoje)`];
   return `<table style="width:100%; border-collapse:collapse; font-size:${pdf ? 11 : 13}px;${pdf ? " margin-top:8px;" : ""}"><${pdf ? "thead><tr" : "tr"} style="background:var(--blue-dark);"><th style="${th} text-align:left;">Regional</th>${cab.map(h => `<th style="${th}">${h}</th>`).join("")}</tr>${pdf ? "</thead><tbody>" : ""}
-    ${f.porRegional.map((r, i) => `<tr style="${pdf ? (i % 2 === 1 ? "background:#EEF2FF;" : "") : `background:${i % 2 === 0 ? "var(--grey-light)" : "white"};`}"><td style="${td} text-align:left; font-weight:700;">${esc(r.regional)}</td><td style="${td}">${r.enviadas}</td><td style="${td}">${r.cancelaram}</td><td style="${td}">${r.canceladosSemana}</td><td style="${td}">${r.migracoes}</td><td style="${td}">${r.emAndamento}</td><td style="${td}">${r.vencidos}</td></tr>`).join("")}${pdf ? "</tbody>" : ""}</table>`;
+    ${f.porRegional.map((r, i) => `<tr style="${pdf ? (i % 2 === 1 ? "background:#EEF2FF;" : "") : `background:${i % 2 === 0 ? "var(--grey-light)" : "white"};`}"><td style="${td} text-align:left; font-weight:700;">${esc(r.regional)}</td><td style="${td}">${r.enviadas}</td><td style="${td}">${r.cancelaram}</td><td style="${td}">${r.canceladosSemana}</td><td style="${td}">${r.migracoes}</td><td style="${td}">${r.vencidos}</td></tr>`).join("")}${pdf ? "</tbody>" : ""}</table>`;
 }
 function renderFca() {
   const cont = document.getElementById("fcaConteudo");
@@ -2524,7 +2524,7 @@ function renderFca() {
   }
   if (f.porRegional.length) html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:6px;">Por regional</div>${fcaTabelaRegional(f, false)}</div>`;
   html += `<div class="list-card" style="margin-bottom:14px;"><div style="font-size:12px; font-weight:700; color:var(--grey); text-transform:uppercase; margin-bottom:4px;">Quem são</div>
-    ${[L.enviadas, L.migracoes, L.andamento, L.cancelados, L.decidContinua].concat(L.continuamPend.linhas.length ? [L.continuamPend] : []).concat([L.prontas, L.prontasAgora, L.desmontadas]).map(x => fcaTabela(x.titulo, x.linhas, x.cols, false)).join("")}</div>`;
+    ${[L.enviadas, L.migracoes, L.cancelados, L.decidContinua].concat(L.continuamPend.linhas.length ? [L.continuamPend] : []).concat([L.prontas, L.prontasAgora, L.desmontadas]).map(x => fcaTabela(x.titulo, x.linhas, x.cols, false)).join("")}</div>`;
   cont.innerHTML = html;
   renderFcaTextos(false);
   fcaUltimo = { preset: document.getElementById("fcaPreset").value, de: document.getElementById("fcaDe").value, ate: document.getElementById("fcaAte").value };
@@ -2555,7 +2555,7 @@ function abrirFcaPdf() {
     ${x.linhas.map((l, i) => `<tr style="${i % 2 === 1 ? "background:#EEF2FF;" : ""}">${l.map((v, k) => `<td style="padding:5px 8px;${k === 0 ? " font-weight:700;" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : "";
   const bloco = (titulo, texto) => `<h3 style="margin:16px 0 4px 0; color:var(--blue-dark); font-size:14px;">${titulo}</h3><div style="font-size:12px; line-height:1.55; white-space:pre-wrap; border:1px solid #C5CAD8; border-radius:6px; padding:8px 10px; min-height:40px;">${texto ? esc(texto) : '<span style="color:var(--grey);">(não preenchido)</span>'}</div>`;
   const logo = document.querySelector("#loginOverlay img").src;
-  const anexos = [L.enviadas, L.migracoes, L.andamento, L.cancelados, L.decidContinua].concat(L.continuamPend.linhas.length ? [L.continuamPend] : []).concat([L.prontas, L.prontasAgora, L.desmontadas]).map(anexo).join("");
+  const anexos = [L.enviadas, L.migracoes, L.cancelados, L.decidContinua].concat(L.continuamPend.linhas.length ? [L.continuamPend] : []).concat([L.prontas, L.prontasAgora, L.desmontadas]).map(anexo).join("");
   document.getElementById("resumoPdfContent").innerHTML = `
     <img class="logo" src="${logo}" alt="UNI Internet">
     <hr class="divider">
